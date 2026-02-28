@@ -1,20 +1,39 @@
 # Unsupervised-Learning-for-HR-Breast-Cancer-RNA-Sequencing
 
-How can unsupervised learning techniques, applied to single-cell RNA sequencing data of HR+ breast cancer patients undergoing nab-paclitaxel and pembrolizumab treatment, identify cell clusters predictive of treatment response, and what biomarkers cause these clusters?
+This repository applies unsupervised machine learning to single-cell RNA sequencing (scRNA-seq) data from hormone receptor–positive (HR+) breast cancer patients treated with nab‑paclitaxel and pembrolizumab. The primary aim is to identify immune cell clusters and transcriptomic biomarkers associated with treatment response.
 
-This project explores the use of unsupervised machine learning (ML) to analyze single-cell RNA sequencing (scRNA-seq) data from HR+ breast cancer patients treated with the combination of nab-paclitaxel and pembrolizumab, with the goal of identifying immune cell clusters and transcriptomic biomarkers predictive of immunotherapy response.
-Immunotherapy has shown benefits in HR+ breast cancer, however its clinical utility is limited by the absence of reliable biomarkers and the risk of immune-related toxicity. Building on recent findings that responders exhibit expansion of GZMB+ cytotoxic CD8 T cells, dynamic TCR clonality, and interferon-driven monocyte and B cell signatures while non-responders display exhausted, static immune states, this project uses clustering techniques to stratify patients according to their likelihood of treatment benefit.
+**Project goals**
+- Identify cell clusters predictive of immunotherapy response.
+- Discover transcriptomic biomarkers (for example, expansion of GZMB+ cytotoxic CD8 T cells and interferon-driven signatures) that distinguish responders from non‑responders.
+- Provide reproducible notebooks and helper scripts to reproduce the main analyses.
 
-Potential applications of this project include:
-1. Cluster patients based on gene sequence profiles
-2. Cluster patients into most likely to respond to least likely to respond
-    1. Find what are the biomarkers or identifications to figure out if people will respond
-3. Cluster cells and their behavior based on their expression profile
-4. Profiling gene sequences
-5. Finding what clusters of genes will perform similarly -> May be useful for treatment
+**Key insights**
+- Responders exhibit expansion of GZMB+ cytotoxic CD8 T cells, dynamic TCR clonality, and interferon-driven monocyte and B cell signatures.
+- Non-responders tend to display exhausted, static immune states.
 
-# Notebook Execution Time
+**Repository layout**
+- `Code/`: main analysis notebook (`Main.ipynb`) and supporting scripts
 
-The total wall time for all cells with timing measurements in the main analysis notebook (`Kaggle Run 2.ipynb`) is approximately 10 hours, 47 minutes, and 31 seconds** using the free resources provided by Kaggle with 2x T4 GPU acceleration. This includes data loading, processing, clustering algorithms, machine learning, and visualization steps.
+**Getting started**
+1. Create a Python environment (recommended Python 3.9+).
+2. Install dependencies:
 
-Last updated: February 10, 2025
+    pip install -r requirements.txt
+
+3. Open and run the main analysis notebook: `Code/Main.ipynb` (this is the primary notebook to run).
+4. To run scripted portions of the analysis:
+
+    python Dev/main.py
+
+**Data**
+- Processed data and derived tables are available in `Processed_Data/` and `Output/Processed_Data/`.
+- Large raw data files are not included in the repository; follow dataset acquisition instructions inside the notebooks.
+
+**Notebook Execution Time**
+The total wall time for all cells with timing measurements in the main analysis notebook (`Code/Main.ipynb`) is approximately 10 hours, 47 minutes, and 31 seconds when executed with GPU acceleration (Kaggle 2x T4 used during development). This includes data loading, processing, clustering, machine learning, and visualization steps.
+
+**Reproducibility notes**
+- Notebooks were developed and tested on Kaggle with GPU acceleration; local runs may require more memory/time.
+- For long experiments, use a machine with GPU and >=30 GB RAM.
+
+Last updated: February 27, 2026

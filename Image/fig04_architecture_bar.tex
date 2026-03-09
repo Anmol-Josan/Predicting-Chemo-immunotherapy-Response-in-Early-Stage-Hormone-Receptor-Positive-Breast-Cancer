@@ -1,0 +1,72 @@
+\documentclass[border=20pt]{standalone}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.15}
+% Larger default fonts for plots
+\pgfplotsset{every axis/.append style={
+  label style={font=\Large},
+  tick label style={font=\large},
+  legend style={font=\large}
+}}
+\usepackage{xcolor}
+\usepackage{newtxtext,newtxmath}
+\begin{document}
+\definecolor{teal}{HTML}{008080}
+\definecolor{tealdark}{HTML}{006666}
+\definecolor{accentblue}{HTML}{1565C0}
+\definecolor{medgray}{HTML}{9E9E9E}
+\definecolor{darktext}{HTML}{212121}
+
+\begin{tikzpicture}
+\begin{axis}[
+  ybar,
+  width=16cm, height=11cm,
+  bar width=18pt,
+  enlarge x limits=0.25,
+  enlarge y limits=0.06,
+  clip=false,
+  symbolic x coords={MLP, CNN, BiLSTM, Transformer, XGBoost, Log. Reg.},
+  xtick=data,
+  x tick label style={font=\large, rotate=20, anchor=east},
+  ymin=0.85, ymax=1.02,
+  ylabel={\textbf{Score}},
+  ylabel style={font=\Large},
+  ytick={0.86, 0.88, 0.90, 0.92, 0.94, 0.96, 0.98, 1.00},
+  yticklabel style={font=\large, /pgf/number format/.cd, fixed, precision=2},
+  grid=major,
+  grid style={gray!20},
+  legend style={
+    at={(0.02,0.98)}, anchor=north west,
+    font=\large, draw=medgray, fill=white, fill opacity=0.92, text opacity=1,
+  },
+  axis lines=left,
+  axis line style={thick, darktext},
+  nodes near coords,
+  every node near coord/.append style={font=\normalsize\bfseries, anchor=south, yshift=8pt},
+  point meta=explicit symbolic,
+]
+
+\addplot[fill=teal!70, draw=tealdark] coordinates {
+  (MLP, 0.928) [.928]
+  (CNN, 0.925) [.925]
+  (BiLSTM, 0.924) [.924]
+  (Transformer, 0.922) [.922]
+  (XGBoost, 0.905) [.905]
+  (Log. Reg., 0.893) [.893]
+};
+\addlegendentry{Accuracy}
+
+\addplot[fill=accentblue!60, draw=accentblue] coordinates {
+  (MLP, 0.978) [.978]
+  (CNN, 0.977) [.977]
+  (BiLSTM, 0.977) [.977]
+  (Transformer, 0.975) [.975]
+  (XGBoost, 0.966) [.966]
+  (Log. Reg., 0.947) [.947]
+};
+\addlegendentry{AUC}
+
+\end{axis}
+\end{tikzpicture}
+
+\end{document}

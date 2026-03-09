@@ -1,0 +1,62 @@
+\documentclass[border=14pt]{standalone}
+\usepackage[table]{xcolor}
+\usepackage{booktabs}
+\usepackage{newtxtext,newtxmath}
+\begin{document}
+\definecolor{tealdark}{HTML}{006666}
+\definecolor{warmred}{HTML}{EF5350}
+
+\vspace*{1cm}
+\begin{center}
+  {\Large\bfseries\textcolor{tealdark}{Dataset Overview}}\\[12pt]
+  \begin{tabular}{@{} l r @{}}
+    \toprule
+    \textbf{Characteristic} & \textbf{Value} \\
+    \midrule
+    Source & GSE300475 (DFCI 16-466 trial) \\
+    Patients & 4 \\
+    Longitudinal samples & 11 \\
+    Total cells & 100,067 \\
+    Genes profiled & $\sim$20,000 \\
+    Cells with productive TCR & $\approx$74\% \\
+    Feature families & 4 (29--429 features) \\
+    Cross-validation & Leave-one-patient-out \\
+    \bottomrule
+  \end{tabular}
+\end{center}
+
+\vspace{2.5cm}
+
+\begin{center}
+  {\Large\bfseries\textcolor{tealdark}{TCR-Only Negative Control (Cell-Level)}}\\[12pt]
+  \begin{tabular}{@{} l c c c c @{}}
+    \toprule
+    \textbf{Feature Set} & \textbf{Accuracy} & \textbf{Precision} & \textbf{Recall} & \textbf{AUC} \\
+    \midrule
+    Comprehensive (multimodal) & 0.928 & 0.878 & 0.936 & \textbf{0.978} \\
+    Seq. Structure (multimodal) & 0.927 & 0.877 & 0.934 & \textbf{0.978} \\
+    \rowcolor{warmred!12}
+    TCR-Only & 0.675 & 0.532 & 1.000 & 0.484 \\
+    \bottomrule
+  \end{tabular}\\[8pt]
+  \begin{minipage}{0.75\textwidth}
+    \normalsize\textit{TCR-only encodings produce a trivial high-recall classifier (recall\,=\,1.0, AUC\,=\,0.484), consistent with predicting all cells as responders. This negative-control result demonstrates that TCR-derived features alone do not drive cell-level discrimination in this cohort.}
+  \end{minipage}
+\end{center}
+
+\vspace{1cm}
+
+\begin{center}
+  \fbox{\begin{minipage}{0.7\textwidth}
+    \centering{\Large\bfseries\textcolor{tealdark}{Limitations}}\\[6pt]
+    \raggedright\normalsize
+    \begin{itemize}\setlength{\itemsep}{2pt}
+      \item Small cohort (4 patients, 11 samples)
+      \item Retrospective dataset - no prospective validation
+      \item Cell-level metrics may not directly translate to patient-level generalizability
+      \item External validation in independent cohorts required
+    \end{itemize}
+  \end{minipage}}
+\end{center}
+
+\end{document}

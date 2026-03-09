@@ -1,0 +1,70 @@
+\documentclass[border=20pt]{standalone}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,calc}
+\usepackage{xcolor}
+\usepackage{newtxtext,newtxmath}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\begin{document}
+
+\definecolor{teal}{HTML}{008080}
+\definecolor{tealdark}{HTML}{006666}
+\definecolor{teallight}{HTML}{B2DFDB}
+\definecolor{accentblue}{HTML}{1565C0}
+\definecolor{accentorange}{HTML}{E65100}
+\definecolor{accentred}{HTML}{C62828}
+\definecolor{warmred}{HTML}{EF5350}
+\definecolor{lightgray}{HTML}{F5F5F5}
+\definecolor{medgray}{HTML}{9E9E9E}
+\definecolor{darktext}{HTML}{212121}
+
+\begin{tikzpicture}[
+  node distance=1.3cm,
+  transform shape,
+  scale=1.0,
+  process/.style={rectangle, rounded corners=4pt, minimum width=4.2cm, minimum height=1.1cm,
+                  align=center, draw=tealdark, fill=teallight, font=\normalsize\bfseries, text=darktext},
+  data/.style={rectangle, rounded corners=2pt, minimum width=3.8cm, minimum height=0.9cm,
+               align=center, draw=medgray, fill=lightgray, font=\small, text=darktext},
+  stagebox/.style={draw=teal, dashed, rounded corners=6pt, inner sep=10pt, fill=teal!3},
+  stagelabel/.style={font=\normalsize\bfseries\scshape, text=tealdark},
+  arrow/.style={thick, ->, >=stealth, color=tealdark}
+]
+
+  % Data acquisition
+  \node (raw) [process] {Raw scRNA-seq + TCR-seq};
+  \node (raw_data) [data, below=0.4cm of raw] {100,067 cells $\cdot$ 20,000+ genes $\cdot$ 4 patients};
+
+  % Preprocessing
+  \node (qc) [process, below=1.1cm of raw_data] {Quality Control & Filtering};
+  \node (qc_data) [data, below=0.35cm of qc] {Ambient RNA removal $\cdot$ doublet detection};
+  \node (norm) [process, below=0.5cm of qc_data] {Log-Normalization};
+
+  % Feature engineering
+  \node (split) [process, below=1.1cm of norm, minimum width=5cm, fill=teal!25] {Parallel Feature Engineering};
+  \node (pca) [process, below=1.0cm of split, xshift=-4cm] {PCA on 1,500 HVGs};
+  \node (pca_data) [data, below=0.35cm of pca] {50 principal components};
+  \node (tcr) [process, below=1.0cm of split, xshift=4cm] {TCR Sequence Encoding};
+  \node (tcr_data) [data, below=0.35cm of tcr] {k-mer + physicochemical features (\textapprox\,74\% productive TCR)};
+
+  % Integration
+  \node (final) [process, below=1.3cm of split, yshift=-3.8cm, minimum width=5cm, fill=teal!30] {Integrated Feature Matrix};
+  \node (final_data) [data, below=0.35cm of final] {4 feature families (29 to 429 features per set)};
+
+  % Arrows
+  \draw [arrow] (raw) -- (raw_data);
+  \draw [arrow] (raw_data) -- (qc);
+  \draw [arrow] (qc) -- (qc_data);
+  \draw [arrow] (qc_data) -- (norm);
+  \draw [arrow] (norm) -- (split);
+  \draw [arrow] (split) -| (pca);
+  \draw [arrow] (split) -| (tcr);
+  \draw [arrow] (pca) -- (pca_data);
+  \draw [arrow] (tcr) -- (tcr_data);
+  \draw [arrow] (pca_data) |- (final);
+  \draw [arrow] (tcr_data) |- (final);
+  \draw [arrow] (final) -- (final_data);
+
+\end{tikzpicture}
+
+\end{document}

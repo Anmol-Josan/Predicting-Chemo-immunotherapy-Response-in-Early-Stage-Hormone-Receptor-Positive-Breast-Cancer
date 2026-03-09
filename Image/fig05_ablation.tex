@@ -1,0 +1,55 @@
+\documentclass[border=20pt]{standalone}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.15}
+% Larger default fonts for readability
+\pgfplotsset{every axis/.append style={
+  label style={font=\Large},
+  tick label style={font=\large},
+  legend style={font=\large}
+}}
+\usepackage{xcolor}
+\usepackage{newtxtext,newtxmath}
+\begin{document}
+\definecolor{teal}{HTML}{008080}
+\definecolor{tealdark}{HTML}{006666}
+\definecolor{warmred}{HTML}{EF5350}
+\definecolor{darktext}{HTML}{212121}
+
+\begin{tikzpicture}
+\begin{axis}[
+  ybar,
+  width=14cm, height=10cm,
+  bar width=20pt,
+  enlarge x limits=0.25,
+  enlarge y limits=0.06,
+  clip=false,
+  symbolic x coords={Comprehensive, Seq. Structure, TCR-Only},
+  xtick=data,
+  x tick label style={font=\large},
+  ymin=0, ymax=1.12,
+  ylabel={\textbf{AUC}},
+  ylabel style={font=\Large},
+  ytick={0, 0.2, 0.4, 0.5, 0.6, 0.8, 1.0},
+  yticklabel style={font=\large},
+  grid=major,
+  grid style={gray!20},
+  axis lines=left,
+  axis line style={thick, darktext},
+  nodes near coords={\pgfmathprintnumber[fixed, precision=3]{\pgfplotspointmeta}},
+  every node near coord/.append style={font=\normalsize\bfseries, anchor=south, yshift=8pt},
+]
+
+\addplot[fill=teal!70, draw=tealdark] coordinates {
+  (Comprehensive, 0.978)
+  (Seq. Structure, 0.978)
+  (TCR-Only, 0.484)
+};
+
+\draw[black!50, dashed, thick] (axis cs:Comprehensive, 0.5) -- (axis cs:TCR-Only, 0.5);
+\node[font=\normalsize, text=black!60, anchor=west] at (axis cs:TCR-Only, 0.52) {chance};
+
+\end{axis}
+\end{tikzpicture}
+
+\end{document}

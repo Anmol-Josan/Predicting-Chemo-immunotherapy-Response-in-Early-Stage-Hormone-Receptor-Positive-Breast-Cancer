@@ -1,0 +1,65 @@
+\documentclass[border=14pt]{standalone}
+\usepackage{tikz}
+\usepackage{xcolor}
+\usepackage{newtxtext,newtxmath}
+\begin{document}
+\definecolor{teal}{HTML}{008080}
+\definecolor{tealdark}{HTML}{006666}
+\definecolor{accentred}{HTML}{C62828}
+\definecolor{warmred}{HTML}{EF5350}
+\definecolor{lightgray}{HTML}{F5F5F5}
+\definecolor{darktext}{HTML}{212121}
+
+\begin{tikzpicture}[scale=1.0]
+
+  % Title
+  \node[font=\Large\bfseries, text=darktext] at (3.5, 6.9) {Comprehensive MLP: Cell-Level Confusion Matrix};
+
+  % Column headers
+  \node[font=\normalsize\bfseries, text=darktext, align=center] at (1.75, 5.9) {Predicted\\Non-Responder};
+  \node[font=\normalsize\bfseries, text=darktext, align=center] at (5.25, 5.9) {Predicted\\Responder};
+
+  % Row headers
+  \node[font=\normalsize\bfseries, text=darktext, align=center, rotate=90, anchor=south] at (-0.8, 3.75) {Actual Responder};
+  \node[font=\normalsize\bfseries, text=darktext, align=center, rotate=90, anchor=south] at (-0.8, 1.25) {Actual Non-Responder};
+
+  % TN
+  \fill[teal!55] (0, 0) rectangle (3.5, 2.5);
+  \draw[tealdark, thick] (0, 0) rectangle (3.5, 2.5);
+  \node[font=\Large\bfseries, text=white] at (1.75, 1.6) {TN};
+  \node[font=\normalsize, text=white] at (1.75, 1.05) {58,281 cells};
+  \node[font=\large\bfseries, text=white] at (1.75, 0.45) {92.4\%};
+
+  % FP
+  \fill[warmred!35] (3.5, 0) rectangle (7, 2.5);
+  \draw[accentred, thick] (3.5, 0) rectangle (7, 2.5);
+  \node[font=\Large\bfseries, text=accentred] at (5.25, 1.6) {FP};
+  \node[font=\normalsize, text=darktext] at (5.25, 1.05) {4,806 cells};
+  \node[font=\large\bfseries, text=accentred] at (5.25, 0.45) {7.6\%};
+
+  % FN
+  \fill[warmred!25] (0, 2.5) rectangle (3.5, 5);
+  \draw[accentred, thick] (0, 2.5) rectangle (3.5, 5);
+  \node[font=\Large\bfseries, text=accentred] at (1.75, 4.1) {FN};
+  \node[font=\normalsize, text=darktext] at (1.75, 3.55) {2,382 cells};
+  \node[font=\large\bfseries, text=accentred] at (1.75, 2.95) {6.4\%};
+
+  % TP
+  \fill[teal!65] (3.5, 2.5) rectangle (7, 5);
+  \draw[tealdark, thick] (3.5, 2.5) rectangle (7, 5);
+  \node[font=\Large\bfseries, text=white] at (5.25, 4.1) {TP};
+  \node[font=\normalsize, text=white] at (5.25, 3.55) {34,598 cells};
+  \node[font=\large\bfseries, text=white] at (5.25, 2.95) {93.6\%};
+
+  % Metric summary box
+    \node[draw=teal, thick, rounded corners=4pt, fill=lightgray, inner sep=8pt,
+      font=\normalsize, text=darktext, anchor=north] at (3.5, -0.6) {
+    \begin{tabular}{@{}ccccc@{}}
+      \textbf{Accuracy} & \textbf{Precision} & \textbf{Recall} & \textbf{Specificity} & \textbf{AUC} \\
+      0.928 & 0.878 & 0.936 & 0.924 & 0.978
+    \end{tabular}
+  };
+
+\end{tikzpicture}
+
+\end{document}

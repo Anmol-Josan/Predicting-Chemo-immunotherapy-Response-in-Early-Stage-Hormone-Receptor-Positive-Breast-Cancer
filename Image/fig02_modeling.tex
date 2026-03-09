@@ -1,0 +1,83 @@
+\documentclass[border=20pt]{standalone}
+% Fix bounding box for wide diagrams
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric,shapes.misc,calc,backgrounds,fit}
+\usepackage{xcolor}
+\usepackage{newtxtext,newtxmath}
+\usepackage{microtype}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.15}
+\begin{document}
+
+\definecolor{teal}{HTML}{008080}
+\definecolor{tealdark}{HTML}{006666}
+\definecolor{teallight}{HTML}{B2DFDB}
+\definecolor{medgray}{HTML}{9E9E9E}
+\definecolor{darktext}{HTML}{212121}
+
+\begin{tikzpicture}[
+  node distance=1.4cm,
+  font=\normalsize,
+  process/.style={rectangle, rounded corners=4pt, minimum width=4.2cm, minimum height=1.1cm,
+                  text centered, draw=tealdark, fill=teallight, font=\normalsize\bfseries, text=darktext},
+  decision/.style={diamond, minimum width=2.8cm, minimum height=1.1cm, text centered,
+                   draw=tealdark, fill=teal!20, aspect=2.2, font=\normalsize\bfseries, text=darktext},
+  data/.style={rectangle, rounded corners=2pt, minimum width=3.4cm, minimum height=0.9cm,
+               text centered, draw=medgray, fill=white, font=\small, text=darktext},
+  stagebox/.style={draw=teal, dashed, rounded corners=6pt, inner sep=8pt, fill=teal!3},
+  stagelabel/.style={font=\normalsize\bfseries\scshape, text=tealdark},
+  arrow/.style={thick, ->, >=stealth, color=tealdark}
+]
+
+  \node (input) [process, minimum width=5cm] {Integrated Features (29 to 429 features)};
+  \node (split) [decision, below=0.9cm of input] {LOPO CV (4-fold)};
+
+  \draw [arrow] (input) -- (split);
+
+  \node (unsup_title) [process, left=3.5cm of split, yshift=-1.8cm, fill=teal!25, minimum width=3.4cm]
+    {Unsupervised Discovery};
+  \node (hvg) [data, below=0.6cm of unsup_title] {HVG selection (1,500 genes)};
+  \node (pca_u) [data, below=0.4cm of hvg] {PCA $\to$ 50 PCs};
+  \node (graph) [data, below=0.4cm of pca_u] {SNN graph (n=15) + UMAP};
+  \node (leiden) [data, below=0.4cm of graph] {Leiden clustering (res. 0.01--1.0)};
+  \node (clust_out) [process, below=0.5cm of leiden, fill=teal!15] {7 clusters (silhouette-optimized)};
+
+  \begin{scope}[on background layer]
+      \node[stagebox, fit=(unsup_title)(hvg)(pca_u)(graph)(leiden)(clust_out),
+        label={[stagelabel,yshift=-6pt]above:{\textsc{Unsupervised}}}] {};
+  \end{scope}
+
+  \draw [arrow] (split) -- ([yshift=-0.2cm]split.south) -- ([xshift=-0.5cm]unsup_title.west);
+  \draw [arrow] (unsup_title) -- (hvg);
+  \draw [arrow] (hvg) -- (pca_u);
+  \draw [arrow] (pca_u) -- (graph);
+  \draw [arrow] (graph) -- (leiden);
+  \draw [arrow] (leiden) -- (clust_out);
+
+  \node (sup_title) [process, right=3.5cm of split, yshift=-1.8cm, fill=teal!25, minimum width=3.4cm]
+    {Supervised Prediction};
+  \node (classical) [data, below=0.6cm of sup_title] {Classical: LR, RF, XGBoost, DT};
+  \node (deep) [data, below=0.4cm of classical] {Deep: MLP, CNN, BiLSTM, RNN, Transformer};
+  \node (tune) [data, below=0.4cm of deep] {Grid / random search};
+  \node (eval) [process, below=0.5cm of tune, fill=teal!15] {Cell-level evaluation};
+  \node (eval_data) [data, below=0.4cm of eval] {\textbf{Best: AUC = 0.978, Acc = 0.928}};
+  \node (interpret) [process, below=0.5cm of eval_data, fill=teal!15] {SHAP + gradient attribution};
+  \node (interp_data) [data, below=0.35cm of interpret] {Top: GZMB, PRF1, IFIT1, IFNG};
+
+  \begin{scope}[on background layer]
+      \node[stagebox, fit=(sup_title)(classical)(deep)(tune)(eval)(eval_data)(interpret)(interp_data),
+        label={[stagelabel,yshift=-6pt]above:{\textsc{Supervised}}}] {};
+  \end{scope}
+
+  \draw [arrow] (split) -- ([yshift=-0.2cm]split.south) -- ([xshift=0.5cm]sup_title.east);
+  \draw [arrow] (sup_title) -- (classical);
+  \draw [arrow] (classical) -- (deep);
+  \draw [arrow] (deep) -- (tune);
+  \draw [arrow] (tune) -- (eval);
+  \draw [arrow] (eval) -- (eval_data);
+  \draw [arrow] (eval_data) -- (interpret);
+  \draw [arrow] (interpret) -- (interp_data);
+
+\end{tikzpicture}
+
+\end{document}

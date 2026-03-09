@@ -30,3 +30,5 @@ Dev/
 
 # Ignore the .env file containing environment variables
 .env
+
+Image/*.md

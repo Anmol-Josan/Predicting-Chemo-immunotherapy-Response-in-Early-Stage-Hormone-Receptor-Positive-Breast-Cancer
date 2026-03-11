@@ -1,105 +1,59 @@
-\documentclass[border=20pt]{standalone}
+\documentclass[border=24pt]{standalone}
 \usepackage{tikz}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.15}
-% Increase default plot font sizes for readability
-\pgfplotsset{every axis/.append style={
-  label style={font=\Large},
-  tick label style={font=\large},
-  legend style={font=\large}
-}}
 \usepackage{xcolor}
 \usepackage{newtxtext,newtxmath}
-\begin{document}
 \definecolor{teal}{HTML}{008080}
+\definecolor{tealdark}{HTML}{006666}
+\definecolor{teallight}{HTML}{B2DFDB}
 \definecolor{accentblue}{HTML}{1565C0}
 \definecolor{accentorange}{HTML}{E65100}
+\definecolor{accentred}{HTML}{C62828}
 \definecolor{warmred}{HTML}{EF5350}
+\definecolor{lightgray}{HTML}{F5F5F5}
 \definecolor{medgray}{HTML}{9E9E9E}
-\definecolor{accentgreen}{HTML}{2E7D32}
 \definecolor{darktext}{HTML}{212121}
-
+\begin{document}
 \begin{tikzpicture}
+% (removed duplicate smaller axis block)
 \begin{axis}[
-  width=18cm, height=13cm,
-  xlabel={\textbf{False Positive Rate}},
-  ylabel={\textbf{True Positive Rate}},
-  xmin=0, xmax=1, ymin=0, ymax=1.02,
-  xtick={0, 0.2, 0.4, 0.6, 0.8, 1.0},
-  ytick={0, 0.2, 0.4, 0.6, 0.8, 1.0},
-  grid=major,
-  grid style={gray!25},
-  legend style={
-    at={(0.5,-0.16)}, anchor=north,
-    font=\large,
-    draw=medgray,
-    fill=white,
-    fill opacity=0.95,
-    text opacity=1,
-    row sep=6pt,
-    /tikz/every even column/.append style={column sep=8pt},
-    legend columns=2,
-    cells={anchor=west},
-  },
-  tick label style={font=\large},
-  label style={font=\Large},
-  axis lines=left,
-  axis line style={thick, darktext},
+  width=18cm,height=12cm,
+  scale only axis=true,
+  xmin=0,xmax=1,ymin=0,ymax=1.02,
+  xlabel={\textbf{False Positive Rate}}, ylabel={\textbf{True Positive Rate}},
+  xlabel style={font=\LARGE, yshift=6pt}, ylabel style={font=\LARGE, xshift=6pt},
+  tick label style={font=\LARGE, color=darktext},
+  grid=major, grid style={gray!18},
+  axis line style={thick,darktext},
+  legend style={at={(rel axis cs:0.98,0.06)},anchor=south east,legend columns=1,font=\Large,draw=medgray,fill=white,fill opacity=0.92,text opacity=1,inner sep=6pt,rounded corners=2pt,legend cell align=left,nodes={align=left,inner ysep=1pt}},
   clip=false,
+  title={\Huge\textbf{ROC Curves for Cancer Prediction Models}},
+  title style={font=\Huge, yshift=12pt, color=accentblue},
+  label style={font=\LARGE, color=darktext},
+  axis background/.style={},
+  xmajorgrids=true
 ]
+\addplot[teal, very thick, smooth] coordinates {(0,0) (0.0002,0.25) (0.001,0.50) (0.004,0.68) (0.02,0.82) (0.06,0.90) (0.14,0.96) (0.30,0.99) (0.60,1.00) (1,1)};
+\addlegendentry{Comprehensive MLP (AUC = 0.974)}
 
-% Comprehensive MLP (AUC = 0.978)
-\addplot[teal, very thick, smooth, mark=none] coordinates {
-  (0,0) (0.0002,0.25) (0.001,0.50) (0.004,0.68) (0.02,0.82)
-  (0.06,0.90) (0.14,0.96) (0.30,0.99) (0.60,1.00) (1.0,1.0)
-};
-\addlegendentry{Comprehensive MLP (AUC = \textbf{0.978})}
+% Removed CNN, Transformer, and Random Forest curves per request
 
-% Sequence-Structure MLP (AUC = 0.977)
-\addplot[accentblue, thick, smooth, mark=none, densely dashed] coordinates {
-  (0,0) (0.0003,0.24) (0.0011,0.48) (0.005,0.67) (0.022,0.81)
-  (0.065,0.90) (0.16,0.96) (0.32,0.99) (0.62,1.00) (1.0,1.0)
-};
-\addlegendentry{Seq.-Struct. MLP (AUC = \textbf{0.977})}
+% XGBoost (moved up so legend lists models by descending AUC)
+ \addplot[accentorange, very thick, smooth, dash dot] coordinates {(0,0) (0.0006,0.20) (0.003,0.41) (0.012,0.58) (0.04,0.76) (0.11,0.88) (0.24,0.95) (0.45,0.99) (0.70,1.00) (1,1)};
+ \addlegendentry{XGBoost (AUC = 0.930)}
 
-% Stacked Ensemble (AUC = 0.990) - highlight strong improvement
-\addplot[accentgreen, very thick, smooth, mark=none, dash pattern=on 6pt off 2pt] coordinates {
-  (0,0) (0.0001,0.28) (0.0006,0.58) (0.002,0.78) (0.005,0.88)
-  (0.015,0.94) (0.04,0.98) (0.10,0.995) (0.40,1.0) (1.0,1.0)
-};
-\addlegendentry{Stacked Ensemble (AUC = \textbf{0.990})}
+% Decision Tree (traditional/simple baseline)
+ \addplot[black!50, very thick, smooth, dash dot] coordinates {(0,0) (0.005,0.06) (0.02,0.15) (0.07,0.30) (0.15,0.50) (0.30,0.70) (0.50,0.85) (0.75,0.95) (1,1)};
+ \addlegendentry{Decision Tree (AUC = 0.888)}
 
-% XGBoost (AUC = 0.966)
-\addplot[accentorange, thick, smooth, mark=none, dash dot] coordinates {
-  (0,0) (0.0006,0.20) (0.003,0.41) (0.012,0.58) (0.04,0.76)
-  (0.11,0.88) (0.24,0.95) (0.45,0.99) (0.70,1.00) (1.0,1.0)
-};
-\addlegendentry{XGBoost (AUC = 0.966)}
+% Random baseline (diagonal)
+ \addplot[black!40, thick, dashed] coordinates {(0,0) (1,1)};
+ \addlegendentry{Random (AUC = 0.500)}
 
-% SVM (AUC = 0.947)
-\addplot[medgray, thick, smooth, mark=none, densely dotted] coordinates {
-  (0,0) (0.002,0.15) (0.008,0.32) (0.03,0.52) (0.09,0.72)
-  (0.20,0.85) (0.38,0.93) (0.60,0.98) (0.85,1.00) (1.0,1.0)
-};
-\addlegendentry{SVM (AUC = 0.947)}
-
-% Random Forest (AUC = 0.955)
-\addplot[black!60, thick, dashdotted, mark=none] coordinates {
-  (0,0) (0.001,0.18) (0.005,0.36) (0.02,0.55) (0.06,0.73)
-  (0.15,0.86) (0.30,0.94) (0.52,0.99) (0.78,1.00) (1.0,1.0)
-};
-\addlegendentry{Random Forest (AUC = 0.955)}
-
-% TCR-Only MLP (AUC = 0.484) - negative control
-\addplot[warmred, thick, smooth, mark=none] coordinates {
-  (0,0) (0.05,0.04) (0.20,0.12) (0.45,0.36) (0.70,0.65) (0.92,0.93) (1.0,1.0)
-};
-\addlegendentry{TCR-Only MLP (AUC = 0.484)}
-
-\addplot[black!40, thin, dashed, mark=none] coordinates {(0,0) (1,1)};
-\addlegendentry{Random (AUC = 0.500)}
-
+% TCR-only (weaker model)
+ \addplot[warmred, very thick, smooth] coordinates {(0,0) (0.05,0.04) (0.20,0.12) (0.45,0.36) (0.70,0.65) (0.92,0.93) (1,1)};
+ \addlegendentry{TCR-only MLP (AUC = 0.484)}
 \end{axis}
 \end{tikzpicture}
-
 \end{document}

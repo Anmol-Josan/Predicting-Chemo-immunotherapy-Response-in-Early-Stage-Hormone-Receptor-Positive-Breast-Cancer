@@ -1,83 +1,59 @@
-\documentclass[border=20pt]{standalone}
-% Fix bounding box for wide diagrams
+\documentclass[border=24pt]{standalone}
 \usepackage{tikz}
-\usetikzlibrary{positioning,arrows.meta,shapes.geometric,shapes.misc,calc,backgrounds,fit}
+\usetikzlibrary{positioning,arrows.meta,fit,backgrounds,calc,shapes.geometric}
 \usepackage{xcolor}
 \usepackage{newtxtext,newtxmath}
-\usepackage{microtype}
-\usepackage{pgfplots}
-\pgfplotsset{compat=1.15}
-\begin{document}
-
 \definecolor{teal}{HTML}{008080}
 \definecolor{tealdark}{HTML}{006666}
 \definecolor{teallight}{HTML}{B2DFDB}
+\definecolor{accentblue}{HTML}{1565C0}
+\definecolor{accentorange}{HTML}{E65100}
+\definecolor{accentred}{HTML}{C62828}
+\definecolor{warmred}{HTML}{EF5350}
+\definecolor{lightgray}{HTML}{F5F5F5}
 \definecolor{medgray}{HTML}{9E9E9E}
 \definecolor{darktext}{HTML}{212121}
-
+\begin{document}
 \begin{tikzpicture}[
-  node distance=1.4cm,
-  font=\normalsize,
-  process/.style={rectangle, rounded corners=4pt, minimum width=4.2cm, minimum height=1.1cm,
-                  text centered, draw=tealdark, fill=teallight, font=\normalsize\bfseries, text=darktext},
-  decision/.style={diamond, minimum width=2.8cm, minimum height=1.1cm, text centered,
-                   draw=tealdark, fill=teal!20, aspect=2.2, font=\normalsize\bfseries, text=darktext},
-  data/.style={rectangle, rounded corners=2pt, minimum width=3.4cm, minimum height=0.9cm,
-               text centered, draw=medgray, fill=white, font=\small, text=darktext},
-  stagebox/.style={draw=teal, dashed, rounded corners=6pt, inner sep=8pt, fill=teal!3},
-  stagelabel/.style={font=\normalsize\bfseries\scshape, text=tealdark},
-  arrow/.style={thick, ->, >=stealth, color=tealdark}
+  node distance=0.75cm and 1.7cm,
+  box/.style={rectangle, rounded corners=5pt, draw=tealdark, fill=teallight, minimum width=4.4cm, minimum height=1.0cm, align=center, font=\large\bfseries, text=darktext},
+  sub/.style={rectangle, rounded corners=3pt, draw=medgray, fill=white, minimum width=4.4cm, minimum height=0.85cm, align=center, font=\normalsize, text=darktext},
+  decision/.style={diamond, draw=tealdark, fill=teal!20, aspect=2.1, minimum width=3.1cm, minimum height=1.0cm, align=center, font=\large\bfseries, text=darktext},
+  stage/.style={draw=teal, dashed, rounded corners=8pt, inner sep=8pt, fill=teal!3},
+  arr/.style={thick, -{Stealth[length=2.8mm]}, draw=tealdark}
 ]
+\node[box, minimum width=6.0cm] (input) {Integrated Features (29--429)};
+\node[decision, below=1.0cm of input] (split) {LOPO CV};
+\draw[arr] (input) -- (split);
 
-  \node (input) [process, minimum width=5cm] {Integrated Features (29 to 429 features)};
-  \node (split) [decision, below=0.9cm of input] {LOPO CV (4-fold)};
+\node[box, below left=1.2cm and 3.0cm of split, fill=teal!25] (utitle) {Unsupervised Discovery};
+\node[sub, below=of utitle] (u1) {HVG selection (1,500 genes)};
+\node[sub, below=of u1] (u2) {PCA to 50 PCs};
+\node[sub, below=of u2] (u3) {SNN graph (n=15) + UMAP};
+\node[box, below=of u3, fill=teal!15] (u4) {Leiden clusters (n=7)};
 
-  \draw [arrow] (input) -- (split);
+\node[box, below right=1.2cm and 3.0cm of split, fill=teal!25] (stitle) {Supervised Prediction};
+\node[sub, below=of stitle] (s1) {ML: LR, RF, XGBoost, DT};
+\node[sub, below=of s1] (s2) {DL: MLP, CNN, BiLSTM, RNN, Transformer};
+\node[sub, below=of s2] (s3) {Hyperparameter search};
+\node[box, below=of s3, fill=teal!15] (s4) {Best: AUC 0.978, Acc 0.928};
+\node[sub, below=of s4] (s5) {Interpretation: SHAP + gradient attribution};
 
-  \node (unsup_title) [process, left=3.5cm of split, yshift=-1.8cm, fill=teal!25, minimum width=3.4cm]
-    {Unsupervised Discovery};
-  \node (hvg) [data, below=0.6cm of unsup_title] {HVG selection (1,500 genes)};
-  \node (pca_u) [data, below=0.4cm of hvg] {PCA $\to$ 50 PCs};
-  \node (graph) [data, below=0.4cm of pca_u] {SNN graph (n=15) + UMAP};
-  \node (leiden) [data, below=0.4cm of graph] {Leiden clustering (res. 0.01--1.0)};
-  \node (clust_out) [process, below=0.5cm of leiden, fill=teal!15] {7 clusters (silhouette-optimized)};
+\draw[arr] (split.south west) -- (utitle.north);
+\draw[arr] (split.south east) -- (stitle.north);
+\draw[arr] (utitle)--(u1);
+\draw[arr] (u1)--(u2);
+\draw[arr] (u2)--(u3);
+\draw[arr] (u3)--(u4);
+\draw[arr] (stitle)--(s1);
+\draw[arr] (s1)--(s2);
+\draw[arr] (s2)--(s3);
+\draw[arr] (s3)--(s4);
+\draw[arr] (s4)--(s5);
 
-  \begin{scope}[on background layer]
-      \node[stagebox, fit=(unsup_title)(hvg)(pca_u)(graph)(leiden)(clust_out),
-        label={[stagelabel,yshift=-6pt]above:{\textsc{Unsupervised}}}] {};
-  \end{scope}
-
-  \draw [arrow] (split) -- ([yshift=-0.2cm]split.south) -- ([xshift=-0.5cm]unsup_title.west);
-  \draw [arrow] (unsup_title) -- (hvg);
-  \draw [arrow] (hvg) -- (pca_u);
-  \draw [arrow] (pca_u) -- (graph);
-  \draw [arrow] (graph) -- (leiden);
-  \draw [arrow] (leiden) -- (clust_out);
-
-  \node (sup_title) [process, right=3.5cm of split, yshift=-1.8cm, fill=teal!25, minimum width=3.4cm]
-    {Supervised Prediction};
-  \node (classical) [data, below=0.6cm of sup_title] {Classical: LR, RF, XGBoost, DT};
-  \node (deep) [data, below=0.4cm of classical] {Deep: MLP, CNN, BiLSTM, RNN, Transformer};
-  \node (tune) [data, below=0.4cm of deep] {Grid / random search};
-  \node (eval) [process, below=0.5cm of tune, fill=teal!15] {Cell-level evaluation};
-  \node (eval_data) [data, below=0.4cm of eval] {\textbf{Best: AUC = 0.978, Acc = 0.928}};
-  \node (interpret) [process, below=0.5cm of eval_data, fill=teal!15] {SHAP + gradient attribution};
-  \node (interp_data) [data, below=0.35cm of interpret] {Top: GZMB, PRF1, IFIT1, IFNG};
-
-  \begin{scope}[on background layer]
-      \node[stagebox, fit=(sup_title)(classical)(deep)(tune)(eval)(eval_data)(interpret)(interp_data),
-        label={[stagelabel,yshift=-6pt]above:{\textsc{Supervised}}}] {};
-  \end{scope}
-
-  \draw [arrow] (split) -- ([yshift=-0.2cm]split.south) -- ([xshift=0.5cm]sup_title.east);
-  \draw [arrow] (sup_title) -- (classical);
-  \draw [arrow] (classical) -- (deep);
-  \draw [arrow] (deep) -- (tune);
-  \draw [arrow] (tune) -- (eval);
-  \draw [arrow] (eval) -- (eval_data);
-  \draw [arrow] (eval_data) -- (interpret);
-  \draw [arrow] (interpret) -- (interp_data);
-
+\begin{scope}[on background layer]
+\node[stage, fit=(utitle)(u1)(u2)(u3)(u4), label={[font=\large\bfseries\scshape,text=tealdark]above:Unsupervised}] {};
+\node[stage, fit=(stitle)(s1)(s2)(s3)(s4)(s5), label={[font=\large\bfseries\scshape,text=tealdark]above:Supervised}] {};
+\end{scope}
 \end{tikzpicture}
-
 \end{document}

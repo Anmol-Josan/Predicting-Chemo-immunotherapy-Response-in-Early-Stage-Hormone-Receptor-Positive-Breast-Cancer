@@ -1,65 +1,44 @@
-\documentclass[border=20pt]{standalone}
+\documentclass[border=24pt]{standalone}
 \usepackage{tikz}
 \usetikzlibrary{decorations.pathreplacing}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.15}
-% Larger default fonts for plots
-\pgfplotsset{every axis/.append style={
-  label style={font=\Large},
-  tick label style={font=\large},
-  legend style={font=\large}
-}}
 \usepackage{xcolor}
 \usepackage{newtxtext,newtxmath}
-\begin{document}
 \definecolor{teal}{HTML}{008080}
 \definecolor{tealdark}{HTML}{006666}
+\definecolor{teallight}{HTML}{B2DFDB}
+\definecolor{accentblue}{HTML}{1565C0}
+\definecolor{accentorange}{HTML}{E65100}
 \definecolor{accentred}{HTML}{C62828}
+\definecolor{warmred}{HTML}{EF5350}
+\definecolor{lightgray}{HTML}{F5F5F5}
+\definecolor{medgray}{HTML}{9E9E9E}
 \definecolor{darktext}{HTML}{212121}
-
+\begin{document}
 \begin{tikzpicture}
 \begin{axis}[
   xbar,
-  width=15cm, height=12cm,
-  bar width=16pt,
-  enlarge y limits=0.12,
-  clip=false,
-  xlabel={\textbf{Mean $|$SHAP$|$ Value (relative)}},
-  xlabel style={font=\Large},
-  ylabel={},
-  xmin=0, xmax=0.20,
-  xtick={0, 0.05, 0.10, 0.15, 0.20},
-  xticklabel style={font=\large},
+  width=16.2cm,height=12.2cm,
+  xmin=0,xmax=0.24,
+  bar width=17pt,
+  xlabel={\textbf{Mean $|$SHAP$|$ value (relative)}}, xlabel style={font=\Large},
+  xtick={0,0.05,0.10,0.15,0.20}, xticklabel style={font=\Large},
   ytick=data,
-  yticklabels={TCR k-mer motif, Gene PC\,2, CD8A, GNLY, Gene PC\,1, NKG7, IFNG, IFIT1, PRF1, GZMB},
-  yticklabel style={font=\large},
-  grid=major,
-  grid style={gray!15, xstep=0.05},
-  axis lines=left,
-  axis line style={thick, darktext},
+  yticklabels={TCR k-mer motif,Gene PC 2,CD8A,GNLY,Gene PC 1,NKG7,IFNG,IFIT1,PRF1,GZMB},
+  yticklabel style={font=\Large},
+  grid=major, grid style={gray!15},
+  axis line style={thick,darktext},
   nodes near coords,
-  every node near coord/.append style={font=\normalsize, anchor=west, xshift=6pt},
-  point meta=explicit symbolic,
+  every node near coord/.append style={font=\normalsize,anchor=west,xshift=3pt},
+  enlarge y limits=0.10,
+  clip=true
 ]
-
-\addplot[fill=teal!65, draw=tealdark] coordinates {
-  (0.030, 1) [.030]
-  (0.040, 2) [.040]
-  (0.050, 3) [.050]
-  (0.060, 4) [.060]
-  (0.070, 5) [.070]
-  (0.080, 6) [.080]
-  (0.090, 7) [.090]
-  (0.100, 8) [.100]
-  (0.120, 9) [.120]
-  (0.150, 10) [.150]
+\addplot+[fill=teal!65, draw=tealdark] coordinates {
+(0.030,1) (0.040,2) (0.050,3) (0.060,4) (0.070,5) (0.080,6) (0.090,7) (0.100,8) (0.120,9) (0.150,10)
 };
-
-\draw[accentred, thick, decorate, decoration={brace, amplitude=6pt, mirror}]
-  (axis cs:0.185, 7.5) -- (axis cs:0.185, 10.5)
-  node[midway, right=8pt, font=\normalsize\bfseries, text=accentred, align=left] {Cytotoxic\\program};
-
+\draw[accentred,thick,decorate,decoration={brace,amplitude=6pt,mirror}] (axis cs:0.20,7.5) -- (axis cs:0.20,10.5)
+node[midway,right=7pt,font=\normalsize\bfseries,text=accentred,align=left] {Cytotoxic\\program};
 \end{axis}
 \end{tikzpicture}
-
 \end{document}

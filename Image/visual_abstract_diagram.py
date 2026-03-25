@@ -51,9 +51,9 @@ def create_visual_abstract():
     draw_box(p_in, "Peripheral Blood\n\nSingle-cell\nRNA + TCR", 3.0, 2.0, c_base, c_b_edge, bold=True)
     draw_box(p_rna, "RNA Pipeline\n\nPCA\n(PC1–PC50)", w, h, c_rna, c_r_edge, bold=True)
     draw_box(p_tcr, "TCR Pipeline\n\nSequence\nEncoding", w, h, c_tcr, c_t_edge, bold=True)
-    draw_box(p_int, "Deep Learning\n(MLP)\n\n Response vs\nNon-response", 3.4, 2.4, c_int, c_i_edge, bold=True)
-    
-    draw_box(p_pc6, "PC6 → Mitochondrial activity", 3.8, 0.8, c_pc6, c_p_edge, fontsize=12, bold=True)
+    draw_box(p_int, "Deep Learning\n(MLP)\n\nUnsupervised Learning\n(UMAP)\n\n Response vs\nNon-response", 3.4, 3, c_int, c_i_edge, bold=True)
+
+    draw_box(p_pc6, "PC6 → Mitochondrial activity", 3.8, 0.8, c_pc6, c_p_edge, fontsize=14, bold=True)
 
     draw_arrow((p_in[0]+1.5, p_in[1]), (p_rna[0]-1.75, p_rna[1]), connectionstyle="arc3,rad=-0.2")
     draw_arrow((p_in[0]+1.5, p_in[1]), (p_tcr[0]-1.75, p_tcr[1]), connectionstyle="arc3,rad=0.2")
@@ -70,8 +70,8 @@ def create_visual_abstract():
                 color='#6B7280', fontweight='bold', family='sans-serif')
 
     plt.tight_layout()
-    plt.savefig('visual_abstract.png', bbox_inches='tight', dpi=600)
-    plt.savefig('visual_abstract.pdf', bbox_inches='tight', dpi=600)
+    plt.savefig('visual_abstract.png', bbox_inches='tight', dpi=1200)
+    plt.savefig('visual_abstract.pdf', bbox_inches='tight', dpi=1200)
     print("Visual abstract saved as visual_abstract.png and visual_abstract.pdf")
 
 if __name__ == "__main__":

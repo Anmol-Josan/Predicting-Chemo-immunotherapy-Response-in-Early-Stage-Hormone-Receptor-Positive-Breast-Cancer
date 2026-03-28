@@ -1,0 +1,1486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab Notebook — Unsupervised Learning for HR+ Breast Cancer RNA-Seq</title>
+  <style>
+    /* ===== Base / Screen Styles ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 11pt;
+      line-height: 1.6;
+      color: #1a1a1a;
+      background: #f5f5f0;
+      padding: 20px;
+    }
+
+    /* ===== Page wrapper (simulates a printed page on screen) ===== */
+    .page {
+      max-width: 8.5in;
+      margin: 0 auto 40px auto;
+      background: #fff;
+      border: 1px solid #ccc;
+      padding: 1in 1in 1in 1in;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+
+    /* ===== Title Page ===== */
+    .title-page {
+      text-align: center;
+      padding: 1.5in 0.5in;
+      border-bottom: 3px double #333;
+      margin-bottom: 40px;
+    }
+    .title-page h1 {
+      font-size: 22pt;
+      font-weight: bold;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+    .title-page .subtitle {
+      font-size: 14pt;
+      font-style: italic;
+      color: #444;
+      margin-bottom: 20px;
+    }
+    .title-page .meta {
+      font-size: 11pt;
+      color: #555;
+      line-height: 2;
+    }
+    .title-page .badge {
+      display: inline-block;
+      margin-top: 24px;
+      border: 1px solid #888;
+      border-radius: 4px;
+      padding: 6px 16px;
+      font-size: 10pt;
+      color: #555;
+      font-family: "Courier New", monospace;
+    }
+
+    /* ===== Section headings ===== */
+    h2 {
+      font-size: 15pt;
+      font-weight: bold;
+      border-bottom: 2px solid #333;
+      padding-bottom: 4px;
+      margin: 32px 0 14px 0;
+    }
+    h3 {
+      font-size: 12pt;
+      font-weight: bold;
+      margin: 20px 0 6px 0;
+      color: #222;
+    }
+
+    /* ===== Abstract / Overview box ===== */
+    .overview-box {
+      border: 1px solid #aaa;
+      border-left: 4px solid #555;
+      padding: 12px 16px;
+      margin-bottom: 24px;
+      background: #fafaf8;
+    }
+    .overview-box p { margin: 6px 0; }
+
+    /* ===== Timeline / entry cards ===== */
+    .phase {
+      margin-bottom: 36px;
+    }
+    .phase-header {
+      background: #2c2c2c;
+      color: #fff;
+      padding: 6px 14px;
+      font-size: 12pt;
+      font-weight: bold;
+      letter-spacing: 0.3px;
+      margin-bottom: 0;
+    }
+    .phase-body {
+      border: 1px solid #bbb;
+      border-top: none;
+      padding: 0;
+    }
+
+    .entry {
+      border-bottom: 1px solid #ddd;
+      padding: 10px 14px;
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 10px;
+      align-items: start;
+    }
+    .entry:last-child { border-bottom: none; }
+    .entry:nth-child(odd) { background: #fafaf8; }
+
+    .entry-date {
+      font-family: "Courier New", monospace;
+      font-size: 9.5pt;
+      color: #555;
+      padding-top: 2px;
+      white-space: nowrap;
+    }
+    .entry-content {}
+    .entry-title {
+      font-weight: bold;
+      font-size: 10.5pt;
+      color: #1a1a1a;
+    }
+    .entry-detail {
+      font-size: 10pt;
+      color: #444;
+      margin-top: 4px;
+    }
+    .entry-hash {
+      font-family: "Courier New", monospace;
+      font-size: 8.5pt;
+      color: #999;
+      margin-top: 3px;
+    }
+
+    /* ===== Milestone highlight ===== */
+    .milestone {
+      background: #fffbea !important;
+      border-left: 3px solid #c8a000;
+    }
+    .milestone .entry-title::before {
+      content: "★ ";
+      color: #c8a000;
+    }
+
+    /* ===== Kaggle run badge ===== */
+    .kaggle-run {
+      background: #f0f7ff !important;
+      border-left: 3px solid #2d7dd2;
+    }
+
+    /* ===== Bug / fix badge ===== */
+    .bugfix {
+      background: #fff5f5 !important;
+      border-left: 3px solid #c0392b;
+    }
+
+    /* ===== Tag pill ===== */
+    .tag {
+      display: inline-block;
+      font-size: 8pt;
+      font-family: "Courier New", monospace;
+      border-radius: 3px;
+      padding: 1px 6px;
+      margin-left: 6px;
+      vertical-align: middle;
+      color: #fff;
+    }
+    .tag-analysis  { background: #27ae60; }
+    .tag-kaggle    { background: #2d7dd2; }
+    .tag-fix       { background: #c0392b; }
+    .tag-refactor  { background: #8e44ad; }
+    .tag-data      { background: #e67e22; }
+    .tag-figure    { background: #16a085; }
+    .tag-milestone { background: #c8a000; color: #000; }
+
+    /* ===== Summary table ===== */
+    .summary-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 10pt;
+    }
+    .summary-table th {
+      background: #2c2c2c;
+      color: #fff;
+      text-align: left;
+      padding: 6px 10px;
+    }
+    .summary-table td {
+      padding: 5px 10px;
+      border-bottom: 1px solid #ddd;
+    }
+    .summary-table tr:nth-child(even) td { background: #fafaf8; }
+
+    /* ===== Footer ===== */
+    footer {
+      text-align: center;
+      font-size: 9pt;
+      color: #888;
+      margin-top: 30px;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+    }
+
+    /* ===== Print Styles ===== */
+    @media print {
+      body {
+        background: #fff;
+        padding: 0;
+        font-size: 10pt;
+      }
+      .page {
+        max-width: 100%;
+        margin: 0;
+        padding: 0.75in 0.75in 0.75in 0.75in;
+        border: none;
+        box-shadow: none;
+        page-break-after: auto;
+      }
+      .title-page {
+        page-break-after: always;
+      }
+      .phase {
+        page-break-inside: avoid;
+      }
+      .phase-header {
+        page-break-after: avoid;
+      }
+      h2 { page-break-after: avoid; }
+      .entry { page-break-inside: avoid; }
+      @page {
+        size: letter portrait;
+        margin: 0.75in;
+      }
+      @page :first {
+        margin-top: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ========================================================= TITLE PAGE -->
+  <div class="title-page">
+    <h1>LAB NOTEBOOK</h1>
+    <div class="subtitle">Unsupervised Learning for HR+ Breast Cancer<br>Single-Cell RNA-Sequencing Analysis</div>
+    <div class="meta">
+      <strong>Principal Investigator / Developer:</strong> Anmol Singh Josan<br>
+      <strong>Institution:</strong> Eastside Preparatory School<br>
+      <strong>Project Start:</strong> August 26, 2025<br>
+      <strong>Last Entry:</strong> March 28, 2026<br>
+      <strong>Repository:</strong> Anmol-Josan / Unsupervised-Learning-For-HR-Breast-Cancer-RNA-Sequencing
+    </div>
+    <div class="badge">git log — chronological record of all commits</div>
+  </div>
+
+  <!-- ========================================================= OVERVIEW -->
+  <h2>Project Overview</h2>
+  <div class="overview-box">
+    <p><strong>Scientific Question:</strong> Can unsupervised machine learning applied to single-cell RNA-sequencing (scRNA-seq) data from hormone receptor–positive (HR+) breast cancer patients treated with nab‑paclitaxel and pembrolizumab identify immune cell clusters and transcriptomic biomarkers associated with treatment response?</p>
+    <p><strong>Data:</strong> scRNA-seq data from HR+ breast cancer patients (GEO dataset; processed via Kaggle GPU environment with 2× T4 GPUs). Dataset includes GEO accession GSM9061665.</p>
+    <p><strong>Primary Notebook:</strong> <code>Code/hr-cancer.ipynb</code> (main analysis); Kaggle cloud runs tracked as versioned Kaggle Notebook "HR+ Cancer".</p>
+    <p><strong>Key Findings:</strong> Responders exhibit expansion of GZMB+ cytotoxic CD8 T cells, dynamic TCR clonality, and interferon-driven monocyte/B cell signatures; non-responders display exhausted, static immune states. Best clustering silhouette score achieved: <strong>0.918</strong>.</p>
+  </div>
+
+  <!-- ========================================================= MILESTONE TABLE -->
+  <h2>Key Milestones at a Glance</h2>
+  <table class="summary-table">
+    <thead>
+      <tr><th>Date</th><th>Milestone</th><th>Details</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>2025-08-26</td><td>Project initialized</td><td>First commit; Data_Loading.ipynb and Data_Processing.ipynb created; silhouette ~0.3</td></tr>
+      <tr><td>2025-09-01</td><td>Silhouette score → 0.918</td><td>Major clustering improvement in Machine_Learning_Analysis.ipynb</td></tr>
+      <tr><td>2025-10-11</td><td>Comprehensive ML pipeline</td><td>Full unsupervised ML analysis with multiple clustering methods added</td></tr>
+      <tr><td>2025-11-12</td><td>First Kaggle deployment (v2)</td><td>HR+ Cancer notebook uploaded to Kaggle; Kaggle Run 2 notebook created</td></tr>
+      <tr><td>2025-12-24</td><td>Kaggle v5</td><td>New run; clustering code stabilized</td></tr>
+      <tr><td>2025-12-26</td><td>Kaggle v7</td><td>Fixed and updated clustering</td></tr>
+      <tr><td>2026-01-01</td><td>Kaggle v12</td><td>Figures Run output committed; new execution times documented</td></tr>
+      <tr><td>2026-02-10</td><td>Bug-fix PR merged (#2)</td><td>XGBClassifier wrapper, helper functions, requirements.txt fixed</td></tr>
+      <tr><td>2026-02-13</td><td>Full run completed</td><td>Full end-to-end execution of hr-cancer.ipynb recorded in repository</td></tr>
+      <tr><td>2026-02-19</td><td>Final code run</td><td>hr-cancer.ipynb trimmed from 5 894 to 1 844 lines of output; clean state</td></tr>
+      <tr><td>2026-03-08</td><td>Kaggle v57 &amp; v59</td><td>Figure optimization; code and image updates</td></tr>
+      <tr><td>2026-03-09</td><td>Kaggle v60 &amp; v62</td><td>Figure generation; LaTeX figure pipeline started</td></tr>
+      <tr><td>2026-03-22</td><td>Major refactor of hr-cancer.ipynb</td><td>Leiden/Louvain fallback, TCR clustering, gene modules, pseudobulk DE</td></tr>
+      <tr><td>2026-03-25</td><td>Kaggle v70 (latest)</td><td>Latest Kaggle cloud run; visual abstract finalized</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ========================================================= PHASE 1 -->
+  <h2>Chronological Lab Entries</h2>
+
+  <!-- PHASE 1 -->
+  <div class="phase">
+    <div class="phase-header">Phase 1 — Project Initialization &amp; Baseline Clustering (Aug – Sep 2025)</div>
+    <div class="phase-body">
+
+      <div class="entry milestone">
+        <div class="entry-date">2025-08-26</div>
+        <div class="entry-content">
+          <div class="entry-title">First Commit — Project Created
+            <span class="tag tag-milestone">MILESTONE</span>
+          </div>
+          <div class="entry-detail">
+            Repository initialized with <code>.gitignore</code>, <code>LICENSE</code>, <code>requirements.txt</code>, <code>README.md</code>, and two notebooks: <code>Notebooks/Data_Loading.ipynb</code> and <code>Notebooks/Data_Processing.ipynb</code> (1 050 and 1 650 lines respectively). Initial silhouette score achieved: ~0.3 — identified as target for improvement.
+          </div>
+          <div class="entry-hash">6e49cc5</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-08-26</div>
+        <div class="entry-content">
+          <div class="entry-title">0.3 Silhouette — Initial Analysis Implementation
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Early ML feature engineering and clustering implementation. Baseline silhouette score documented at 0.3; identified as needing significant improvement.</div>
+          <div class="entry-hash">357f994</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-08-26</div>
+        <div class="entry-content">
+          <div class="entry-title">Refactor Output Logging in Data Processing Notebook
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Improved output logging for reproducibility and debugging in <code>Data_Processing.ipynb</code>.</div>
+          <div class="entry-hash">5bcfa21</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-08-26</div>
+        <div class="entry-content">
+          <div class="entry-title">Fixed Bugs in Data_Processing.ipynb
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Bug fixes in the data processing pipeline.</div>
+          <div class="entry-hash">350dd73</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-08-26</div>
+        <div class="entry-content">
+          <div class="entry-title">Feature Names Mapping — Enhanced Model Performance
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Added feature names mapping for improved model interpretability and updated the analysis summary output format.</div>
+          <div class="entry-hash">881aef7</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-08-27</div>
+        <div class="entry-content">
+          <div class="entry-title">Fixed Kernel Issues — HDBSCAN Installation
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Added HDBSCAN kernel installation instructions to resolve dependency conflicts in the analysis notebook.</div>
+          <div class="entry-hash">41bc9dc</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-08-27</div>
+        <div class="entry-content">
+          <div class="entry-title">Updated Data_Processing.ipynb
+            <span class="tag tag-data">data</span>
+          </div>
+          <div class="entry-detail">Data processing pipeline updates.</div>
+          <div class="entry-hash">02b1121</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-08-30</div>
+        <div class="entry-content">
+          <div class="entry-title">Refactor — Improved Code Structure
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Code structure refactored for readability and maintainability across analysis notebooks.</div>
+          <div class="entry-hash">722cf5f</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-08-30</div>
+        <div class="entry-content">
+          <div class="entry-title">Fixed Kernel Issues
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Additional kernel/environment fixes for the Jupyter analysis environment.</div>
+          <div class="entry-hash">5b230ef</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-08-31</div>
+        <div class="entry-content">
+          <div class="entry-title">Results from Updated Machine Learning Run
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Committed output from an updated ML training run reflecting incremental improvements over the baseline.</div>
+          <div class="entry-hash">59223fa</div>
+        </div>
+      </div>
+
+      <div class="entry milestone">
+        <div class="entry-date">2025-09-01</div>
+        <div class="entry-content">
+          <div class="entry-title">Silhouette Score Improved to <strong>0.918</strong>
+            <span class="tag tag-milestone">MILESTONE</span>
+          </div>
+          <div class="entry-detail">
+            Major breakthrough: clustering silhouette score improved from ~0.3 to <strong>0.918</strong>. Achieved by significantly expanding <code>Notebooks/Machine_Learning_Analysis.ipynb</code> (+1 953 lines). This marked the point at which cluster quality became sufficient to draw biological conclusions.
+          </div>
+          <div class="entry-hash">9946e6d</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-09-01</div>
+        <div class="entry-content">
+          <div class="entry-title">Added Notebook Execution Logging
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Added structured execution logging to track notebook run times and outputs for reproducibility.</div>
+          <div class="entry-hash">8897fb3</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-09-12</div>
+        <div class="entry-content">
+          <div class="entry-title">Machine Learning Analysis Optimized for Data Collection
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Pipeline optimized to improve data throughput and collection during analysis execution.</div>
+          <div class="entry-hash">c5066e3</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- PHASE 2 -->
+  <div class="phase">
+    <div class="phase-header">Phase 2 — Expanded Analysis &amp; New Clustering Methods (Oct 2025)</div>
+    <div class="phase-body">
+
+      <div class="entry">
+        <div class="entry-date">2025-10-10</div>
+        <div class="entry-content">
+          <div class="entry-title">New Analysis
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">New analytical approach introduced; experimental changes to the hr-cancer analysis codebase.</div>
+          <div class="entry-hash">c3aa58d</div>
+        </div>
+      </div>
+
+      <div class="entry milestone">
+        <div class="entry-date">2025-10-11</div>
+        <div class="entry-content">
+          <div class="entry-title">Added Perfected Analysis
+            <span class="tag tag-milestone">MILESTONE</span>
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Completed and committed a "perfected" analysis version — represents a key stable checkpoint in the analytical pipeline.</div>
+          <div class="entry-hash">622afaf</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-10-11</div>
+        <div class="entry-content">
+          <div class="entry-title">Comprehensive Unsupervised ML Analysis Added
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">
+            Comprehensive unsupervised machine learning analysis added to the hr-cancer notebook, including multiple clustering algorithms (K-Means, HDBSCAN, Agglomerative, Leiden, Louvain) and comparative evaluation.
+          </div>
+          <div class="entry-hash">efcbc98</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-10-12</div>
+        <div class="entry-content">
+          <div class="entry-title">Simplified Codebase
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Codebase simplified for maintainability; redundant analysis cells consolidated.</div>
+          <div class="entry-hash">cd4874f</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-10-12</div>
+        <div class="entry-content">
+          <div class="entry-title">LASSO Run
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">LASSO regression run to identify key gene features contributing to cluster separation and treatment response classification.</div>
+          <div class="entry-hash">13b894a</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-10-12</div>
+        <div class="entry-content">
+          <div class="entry-title">README Updated — Notebook Execution Time
+            <span class="tag tag-data">docs</span>
+          </div>
+          <div class="entry-detail">README updated to reflect actual notebook execution times for reproducibility reference.</div>
+          <div class="entry-hash">00ea267</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-10-23</div>
+        <div class="entry-content">
+          <div class="entry-title">Clustering Analysis Section — Label, Visualize, Marker Genes
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Added full clustering analysis section: cluster labeling, UMAP visualization, and marker gene identification for each cluster.</div>
+          <div class="entry-hash">91cf62c</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-10-23</div>
+        <div class="entry-content">
+          <div class="entry-title">Refactor Data Loading &amp; Clustering Processes
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Data loading and clustering pipelines refactored for improved modularity and reproducibility in the hr-cancer notebook.</div>
+          <div class="entry-hash">027a89c</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-10-23</div>
+        <div class="entry-content">
+          <div class="entry-title">Enhanced Download &amp; Processing Functions
+            <span class="tag tag-data">data</span>
+          </div>
+          <div class="entry-detail">Download and data processing helper functions improved for robustness and efficiency in the hr-cancer notebook.</div>
+          <div class="entry-hash">700782e</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-10-24</div>
+        <div class="entry-content">
+          <div class="entry-title">New Analysis &amp; Visualizations Added
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Updated hr-cancer.ipynb with new analytical methods and corresponding visualizations.</div>
+          <div class="entry-hash">22bf18b</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-10-24</div>
+        <div class="entry-content">
+          <div class="entry-title">Best Clustering — Silhouette Score Selection
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Added automated loading of clustering results and selection of best clustering configuration based on silhouette score comparison across methods.</div>
+          <div class="entry-hash">17d2ff7</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-10-24</div>
+        <div class="entry-content">
+          <div class="entry-title">Feature Enhancement &amp; Bug Fix
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Miscellaneous feature enhancements and bug fixes.</div>
+          <div class="entry-hash">599c3d6</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- PHASE 3 -->
+  <div class="phase">
+    <div class="phase-header">Phase 3 — Kaggle Deployment &amp; Pipeline Extension (Nov 2025)</div>
+    <div class="phase-body">
+
+      <div class="entry">
+        <div class="entry-date">2025-11-11</div>
+        <div class="entry-content">
+          <div class="entry-title">Added Additional Analysis
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Further analytical modules added to the hr-cancer analysis pipeline.</div>
+          <div class="entry-hash">5458c67</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-11-11</div>
+        <div class="entry-content">
+          <div class="entry-title">Implement Code Changes — Enhanced Functionality
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Code improvements for enhanced pipeline functionality and performance.</div>
+          <div class="entry-hash">12099bf</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-11-11</div>
+        <div class="entry-content">
+          <div class="entry-title">Notebook Cell Reordering Scripts Added
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Two scripts added for dependency-aware reordering of Jupyter notebook cells: <code>reorder_hr_cancer_nb_v2.py</code> enables logical structure enforcement in the hr-cancer notebook.</div>
+          <div class="entry-hash">cd9bc89 / 2ec857d</div>
+        </div>
+      </div>
+
+      <div class="entry milestone">
+        <div class="entry-date">2025-11-12</div>
+        <div class="entry-content">
+          <div class="entry-title">Kaggle Notebook — HR+ Cancer Version 2 (First Cloud Deployment)
+            <span class="tag tag-milestone">MILESTONE</span>
+            <span class="tag tag-kaggle">kaggle</span>
+          </div>
+          <div class="entry-detail">
+            First deployment of the HR+ Cancer notebook to Kaggle cloud environment (<em>Kaggle Notebook | HR+ Cancer | Version 2</em>). Enables GPU-accelerated execution with 2× T4 GPUs. Companion "Kaggle Run 2" notebook also committed.
+          </div>
+          <div class="entry-hash">c3010e0 / 3314536</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-11-12</div>
+        <div class="entry-content">
+          <div class="entry-title">Fixed Issues
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Bug fixes following first Kaggle deployment.</div>
+          <div class="entry-hash">baef79d</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-11-14</div>
+        <div class="entry-content">
+          <div class="entry-title">Removed Unnecessary Files
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Cleanup of unnecessary files from the repository.</div>
+          <div class="entry-hash">20c9949</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-11-15</div>
+        <div class="entry-content">
+          <div class="entry-title">Redid File Format; Deleted LICENSE
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Repository file structure reorganized; LICENSE file removed.</div>
+          <div class="entry-hash">e5d5760 / 6b31b67</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- PHASE 4 -->
+  <div class="phase">
+    <div class="phase-header">Phase 4 — Figure Generation &amp; Kaggle Iteration (Dec 2025)</div>
+    <div class="phase-body">
+
+      <div class="entry">
+        <div class="entry-date">2025-12-11</div>
+        <div class="entry-content">
+          <div class="entry-title">Python Version Update — 3.11 → 3.12
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Jupyter notebook kernel metadata updated from Python 3.11.13 to Python 3.12.8 for compatibility.</div>
+          <div class="entry-hash">ceb6026</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-12-12</div>
+        <div class="entry-content">
+          <div class="entry-title">Visualization Figures Added — Patient Identity, Treatment Response, Model Performance
+            <span class="tag tag-figure">figure</span>
+          </div>
+          <div class="entry-detail">Key publication-quality visualization figures committed: patient identity cluster plots, treatment response overlays, and model performance charts.</div>
+          <div class="entry-hash">bad371b</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-12-12</div>
+        <div class="entry-content">
+          <div class="entry-title">Code Refactors (×2)
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Two rounds of code structure refactoring for improved readability and maintainability.</div>
+          <div class="entry-hash">7022aa2 / 01f560c</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-12-19</div>
+        <div class="entry-content">
+          <div class="entry-title">README Updates
+            <span class="tag tag-data">docs</span>
+          </div>
+          <div class="entry-detail">README updated with current project status and execution details.</div>
+          <div class="entry-hash">3fa5cfb / 479717f</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-12-20</div>
+        <div class="entry-content">
+          <div class="entry-title">Notebook Metadata Update
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Notebook kernel display name updated to "Python 3" for Kaggle compatibility.</div>
+          <div class="entry-hash">cbda3be</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-12-21 – 22</div>
+        <div class="entry-content">
+          <div class="entry-title">README Update; Kaggle Run Updates (Deprecated)
+            <span class="tag tag-kaggle">kaggle</span>
+          </div>
+          <div class="entry-detail">README and notebook updated on Dec 21st. Dec 22nd: half-run committed with unsupervised code condensed into single file (marked deprecated); Kaggle Run 2 model evaluation results enhanced; environment file removed.</div>
+          <div class="entry-hash">07e5f6e / ad969d7 / a92cb85 / f7c41b9</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-12-23</div>
+        <div class="entry-content">
+          <div class="entry-title">Refactor File Paths in Kaggle Run 2; Feature Enhancement
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Kaggle Run 2 notebook updated to use consistent relative file paths for input/output files. Minor feature enhancements.</div>
+          <div class="entry-hash">c7093c9 / 7edbcc9</div>
+        </div>
+      </div>
+
+      <div class="entry milestone">
+        <div class="entry-date">2025-12-24</div>
+        <div class="entry-content">
+          <div class="entry-title">Kaggle Notebook — HR+ Cancer Version 5
+            <span class="tag tag-kaggle">kaggle</span>
+          </div>
+          <div class="entry-detail">New Kaggle run (v5); clustering pipeline stabilized. Archive/ directory added to .gitignore.</div>
+          <div class="entry-hash">d0fae23 / 672dec0 / ca706e1</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-12-25 – 26</div>
+        <div class="entry-content">
+          <div class="entry-title">README Update; New Run; Kaggle Version 7
+            <span class="tag tag-kaggle">kaggle</span>
+          </div>
+          <div class="entry-detail">Updated README on Dec 25th. Dec 26th: new local run committed; Kaggle Notebook HR+ Cancer Version 7 output saved.</div>
+          <div class="entry-hash">162a388 / 2d0d5db / 06ffcf9</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-12-27</div>
+        <div class="entry-content">
+          <div class="entry-title">New Clustering Code; Fixed Clustering
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">New clustering code introduced (no run yet); immediately followed by bug fixes producing a working clustering implementation.</div>
+          <div class="entry-hash">dd1a0b5 / 8417b48</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-12-28</div>
+        <div class="entry-content">
+          <div class="entry-title">Agglomerative Clustering Visualization Script Added
+            <span class="tag tag-figure">figure</span>
+          </div>
+          <div class="entry-detail">New Python visualization script (<code>4b37555</code>) added for agglomerative clustering results plotting.</div>
+          <div class="entry-hash">4b37555</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-12-29</div>
+        <div class="entry-content">
+          <div class="entry-title">Refactor Code for Readability
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Another refactoring pass for code readability and maintainability.</div>
+          <div class="entry-hash">139a58f</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2025-12-30 – 31</div>
+        <div class="entry-content">
+          <div class="entry-title">Updated Clustering; Updated Kaggle Run
+            <span class="tag tag-kaggle">kaggle</span>
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Clustering code updated Dec 30th; updated Kaggle run output saved Dec 31st.</div>
+          <div class="entry-hash">6bee8f2 / 93fc0c3</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- PHASE 5 -->
+  <div class="phase">
+    <div class="phase-header">Phase 5 — New Year Kaggle Sprint &amp; Bug Fixing (Jan 2026)</div>
+    <div class="phase-body">
+
+      <div class="entry milestone">
+        <div class="entry-date">2026-01-01</div>
+        <div class="entry-content">
+          <div class="entry-title">Kaggle Notebook — HR+ Cancer Version 12; Figures Run Output Committed
+            <span class="tag tag-kaggle">kaggle</span>
+            <span class="tag tag-milestone">MILESTONE</span>
+          </div>
+          <div class="entry-detail">Version 12 Kaggle run completed and committed with full Figures Run output (7 748 lines). Kernel metadata added; README updated with new execution times.</div>
+          <div class="entry-hash">b942afd / b15afff / 5bf85e1 / 39557fb</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-02</div>
+        <div class="entry-content">
+          <div class="entry-title">Fixed Code
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Code fixes following Version 12 run.</div>
+          <div class="entry-hash">082dbb3</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-04</div>
+        <div class="entry-content">
+          <div class="entry-title">Improved Model Evaluation &amp; Training; README Execution Time Update
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Model evaluation and training processes improved. README updated with latest execution time benchmarks.</div>
+          <div class="entry-hash">9c02a7b / 289d81e</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-03 – 04</div>
+        <div class="entry-content">
+          <div class="entry-title">Moved &amp; Reverted Old Python Files to Archive
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Old Python scripts moved to Archive/ directory (Jan 3rd); this was subsequently reverted (Jan 4th) after review.</div>
+          <div class="entry-hash">edf542a / 7ac5ce1</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-06</div>
+        <div class="entry-content">
+          <div class="entry-title">README Updated — GPU Execution Time; Feature Enhancement
+            <span class="tag tag-data">docs</span>
+          </div>
+          <div class="entry-detail">README updated to reflect new GPU execution time benchmark. Additional feature enhancements implemented.</div>
+          <div class="entry-hash">c75fb83 / d96931e</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-07</div>
+        <div class="entry-content">
+          <div class="entry-title">Updated Codebase to Not Error; Updated .gitignore
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Codebase updated to resolve errors. .gitignore updated to exclude additional build/output artifacts.</div>
+          <div class="entry-hash">d5057fc / 2ef736a</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-08 – 09</div>
+        <div class="entry-content">
+          <div class="entry-title">Fixed Bugs; Delta in Run
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Multiple bug fixes across two commits. Delta in run output documented.</div>
+          <div class="entry-hash">8618f97 / bf9b8d8 / 847d1bc</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-12</div>
+        <div class="entry-content">
+          <div class="entry-title">Solved Timeout Error
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Timeout error resolved, allowing longer training runs to complete successfully.</div>
+          <div class="entry-hash">5567c72</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-13</div>
+        <div class="entry-content">
+          <div class="entry-title">Heavy Optimization — Lower Accuracy Trade-off
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Heavy computational optimization applied to reduce memory usage and execution time; noted trade-off of lower accuracy at this stage.</div>
+          <div class="entry-hash">0383613</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-14</div>
+        <div class="entry-content">
+          <div class="entry-title">Fix Kaggle Run 2 Typo; Remove Try-Catch; Fixed adata Error
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Typo corrected in Kaggle Run 2 notebook. Try-catch error block removed from hr-cancer analysis. AnnData (adata) object error fixed.</div>
+          <div class="entry-hash">ae9de46 / ecfdd07 / 8e4a79c</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-15</div>
+        <div class="entry-content">
+          <div class="entry-title">Another AnnData Error Iteration
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Additional iteration to resolve persistent AnnData (adata) object loading/processing errors.</div>
+          <div class="entry-hash">f115ac0</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-16</div>
+        <div class="entry-content">
+          <div class="entry-title">Import Error Fixed
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Python import error resolved in the hr-cancer notebook environment.</div>
+          <div class="entry-hash">44657fc</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-17</div>
+        <div class="entry-content">
+          <div class="entry-title">Fixed More Bugs
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Additional bug fixes in the analysis pipeline.</div>
+          <div class="entry-hash">ae7f079</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-21</div>
+        <div class="entry-content">
+          <div class="entry-title">Broken → Joblib Thread Update
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">State noted as "broken" after previous changes; Joblib parallelism updated to use thread backend as a fix.</div>
+          <div class="entry-hash">0d03cb9 / e992a60</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-22</div>
+        <div class="entry-content">
+          <div class="entry-title">Updated; Removed Joblib from AnnData
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">General code update; Joblib parallelism removed from AnnData processing section to resolve incompatibility.</div>
+          <div class="entry-hash">1f675a6 / 476b1ef</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-24</div>
+        <div class="entry-content">
+          <div class="entry-title">AnnData Resolution Attempts (×3)
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Three iterative attempts to resolve AnnData processing errors: (1) attempt to resolve adata, (2) fixed adata logic / new recursion error identified, (3) updated code snippet.</div>
+          <div class="entry-hash">55778ee / 8233ac8 / 68bf183</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-26</div>
+        <div class="entry-content">
+          <div class="entry-title">OOM (Out of Memory) Issue Encountered
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Out-of-memory error logged and committed; memory optimization needed for large scRNA-seq dataset processing.</div>
+          <div class="entry-hash">4f18ef1</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-01-28 – 29</div>
+        <div class="entry-content">
+          <div class="entry-title">Updated Code (×2); Removed Sum Error
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Two code updates on Jan 28th. Sum aggregation error removed from the analysis pipeline on Jan 29th.</div>
+          <div class="entry-hash">fea672c / c088b14 / df4600a</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- PHASE 6 -->
+  <div class="phase">
+    <div class="phase-header">Phase 6 — Transformer Integration &amp; Full Pipeline Run (Feb 2026)</div>
+    <div class="phase-body">
+
+      <div class="entry">
+        <div class="entry-date">2026-02-01 – 02</div>
+        <div class="entry-content">
+          <div class="entry-title">Update; Requirements Added
+            <span class="tag tag-data">deps</span>
+          </div>
+          <div class="entry-detail">General codebase update; requirements.txt dependencies refreshed.</div>
+          <div class="entry-hash">04fc080 / a9a5306</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-02-03</div>
+        <div class="entry-content">
+          <div class="entry-title">Fixed Pipeline
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Full pipeline fix — end-to-end pipeline now functional after extensive debugging cycle.</div>
+          <div class="entry-hash">1b3b6c0</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-02-06</div>
+        <div class="entry-content">
+          <div class="entry-title">Errors Resolved — Working on Transformer; Optimized Memory; Better Logging
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Three commits on Feb 6th: (1) errors resolved, transformer integration begun; (2) memory optimization applied; (3) improved logging throughout the pipeline.</div>
+          <div class="entry-hash">0bbd08b / 3d4513d / e2edf0b</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-02-07</div>
+        <div class="entry-content">
+          <div class="entry-title">Error Log + TPU → Cached to Github → Reverted
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">TPU integration with error logging attempted and committed; results cached to GitHub; then reverted due to issues. Output from the run uploaded separately.</div>
+          <div class="entry-hash">da47875 / df5aa24 / 7fa5366 / 7044cfd</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-02-08</div>
+        <div class="entry-content">
+          <div class="entry-title">Removed Inefficient Code
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Inefficient code sections removed from hr-cancer.ipynb to improve execution speed.</div>
+          <div class="entry-hash">65537c4</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-02-09</div>
+        <div class="entry-content">
+          <div class="entry-title">Updated README
+            <span class="tag tag-data">docs</span>
+          </div>
+          <div class="entry-detail">README updated with current project status and instructions.</div>
+          <div class="entry-hash">611fc48</div>
+        </div>
+      </div>
+
+      <div class="entry milestone">
+        <div class="entry-date">2026-02-10</div>
+        <div class="entry-content">
+          <div class="entry-title">Merged Bug-Fix PR #2 — XGBClassifier, Helper Functions, requirements.txt
+            <span class="tag tag-milestone">MILESTONE</span>
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">
+            Pull Request #2 from <code>copilot/fix-errors-in-hr-cancer-notebook</code> merged. Three fixes:
+            <ol style="margin-top:6px; margin-left:18px;">
+              <li>Added missing <code>aggregate_patient_features</code> and helper functions to fix <code>NameError</code></li>
+              <li>Fixed <code>XGBClassifierSK</code> wrapper to store <code>predictor</code> attribute properly</li>
+              <li>Fixed typo in <code>requirements.txt</code> (TensorFlow line)</li>
+            </ol>
+          </div>
+          <div class="entry-hash">caf664a / 9fb9c1a / 76e767d / a6879ff / 2e9a556</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-02-11 – 12</div>
+        <div class="entry-content">
+          <div class="entry-title">Kaggle v46; Save Weights; Updated Code Readability
+            <span class="tag tag-kaggle">kaggle</span>
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Kaggle v46 run recorded. Model weights saving implemented. Code readability improvements committed.</div>
+          <div class="entry-hash">84b8c03 / 1c6801d / a1da82e</div>
+        </div>
+      </div>
+
+      <div class="entry milestone">
+        <div class="entry-date">2026-02-13</div>
+        <div class="entry-content">
+          <div class="entry-title">Full Run Completed
+            <span class="tag tag-milestone">MILESTONE</span>
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">
+            First full end-to-end run of <code>hr-cancer.ipynb</code> committed to the repository. Notebook contains full output (~1 949 insertions, ~1 976 deletions over previous state). Kaggle v47 also recorded.
+          </div>
+          <div class="entry-hash">4598e2e / 357a9a9</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-02-14</div>
+        <div class="entry-content">
+          <div class="entry-title">Updated Codebase; Kaggle v48
+            <span class="tag tag-kaggle">kaggle</span>
+          </div>
+          <div class="entry-detail">General codebase update and Kaggle v48 output recorded.</div>
+          <div class="entry-hash">7b276f3 / 91f0c66</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-02-15</div>
+        <div class="entry-content">
+          <div class="entry-title">Kaggle v52
+            <span class="tag tag-kaggle">kaggle</span>
+          </div>
+          <div class="entry-detail">Kaggle Notebook HR+ Cancer Version 52 output committed.</div>
+          <div class="entry-hash">19c9880</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-02-16</div>
+        <div class="entry-content">
+          <div class="entry-title">Kaggle v53 &amp; v54; Updated HR-Cancer ML Flow; Half Run with Transformer
+            <span class="tag tag-kaggle">kaggle</span>
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Kaggle versions 53 and 54 recorded. ML flow diagram in hr-cancer updated. Transformer-based model partially integrated — half-run committed showing new architecture.</div>
+          <div class="entry-hash">4b9b886 / 1fa6f02 / 8a4bcdf / 4a94368</div>
+        </div>
+      </div>
+
+      <div class="entry milestone">
+        <div class="entry-date">2026-02-19</div>
+        <div class="entry-content">
+          <div class="entry-title">Final Code Run — hr-cancer.ipynb Cleaned
+            <span class="tag tag-milestone">MILESTONE</span>
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">
+            "Final Code Run" committed: <code>hr-cancer.ipynb</code> dramatically cleaned and reduced from ~5 894 lines to ~1 844 lines of output (+1 844 insertions, −4 050 deletions). Represents the cleaned, production-ready state of the main analysis notebook.
+          </div>
+          <div class="entry-hash">1de6d46</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-02-19</div>
+        <div class="entry-content">
+          <div class="entry-title">Created Figure LaTeX Files
+            <span class="tag tag-figure">figure</span>
+          </div>
+          <div class="entry-detail">LaTeX source files created for publication-quality figures.</div>
+          <div class="entry-hash">22c0506</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-02-22</div>
+        <div class="entry-content">
+          <div class="entry-title">Images Committed
+            <span class="tag tag-figure">figure</span>
+          </div>
+          <div class="entry-detail">Image assets committed to repository.</div>
+          <div class="entry-hash">d176daa</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-02-23</div>
+        <div class="entry-content">
+          <div class="entry-title">Updated README
+            <span class="tag tag-data">docs</span>
+          </div>
+          <div class="entry-detail">README updated with project status and instructions.</div>
+          <div class="entry-hash">250a49c</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-02-25</div>
+        <div class="entry-content">
+          <div class="entry-title">Removed .zux File
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">Removed obsolete .zux environment file from the repository.</div>
+          <div class="entry-hash">e739341</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-02-27 – 28</div>
+        <div class="entry-content">
+          <div class="entry-title">Updated README; Made Main Notebook; Data Science Final
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">README finalized (Feb 27th). <code>Code/Main.ipynb</code> created as the primary user-facing notebook (Feb 27th). Data Science Final version committed (Feb 28th).</div>
+          <div class="entry-hash">ba7cf83 / 970fc0e / 2a1428e</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- PHASE 7 -->
+  <div class="phase">
+    <div class="phase-header">Phase 7 — Figure Polish, Kaggle Final Runs &amp; Visual Abstract (Mar 2026)</div>
+    <div class="phase-body">
+
+      <div class="entry">
+        <div class="entry-date">2026-03-01</div>
+        <div class="entry-content">
+          <div class="entry-title">Data Science Application Script
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Data science application script committed for external presentation/submission purposes.</div>
+          <div class="entry-hash">4de4039</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-03-08</div>
+        <div class="entry-content">
+          <div class="entry-title">Updated Code and Images for Figure Optimization; Kaggle v57 &amp; v59
+            <span class="tag tag-figure">figure</span>
+            <span class="tag tag-kaggle">kaggle</span>
+          </div>
+          <div class="entry-detail">Figure optimization: code and image assets updated for publication-quality output. Kaggle Notebook versions 57 and 59 run and committed.</div>
+          <div class="entry-hash">b1c9dac / 8444e37 / ebf25a1</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-03-09</div>
+        <div class="entry-content">
+          <div class="entry-title">Kaggle v60 &amp; v62; Created Figures (Working); Updated .gitignore
+            <span class="tag tag-figure">figure</span>
+            <span class="tag tag-kaggle">kaggle</span>
+          </div>
+          <div class="entry-detail">Kaggle versions 60 and 62 run. Figure generation pipeline: several figures created, others still in progress. .gitignore updated to exclude large figure outputs.</div>
+          <div class="entry-hash">550c8a9 / f0679c1 / d8f0fef / f7450ec</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-03-10</div>
+        <div class="entry-content">
+          <div class="entry-title">More Figures Updates
+            <span class="tag tag-figure">figure</span>
+          </div>
+          <div class="entry-detail">Continued figure updates to hr-cancer.ipynb for publication preparation.</div>
+          <div class="entry-hash">dc3fc97</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-03-19</div>
+        <div class="entry-content">
+          <div class="entry-title">Fixed Issues; Removed Old Final
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Bug fixes applied. Old "final" notebook/files removed to keep repository clean.</div>
+          <div class="entry-hash">2fd231e / 5253dd5</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-03-20</div>
+        <div class="entry-content">
+          <div class="entry-title">Recreations
+            <span class="tag tag-figure">figure</span>
+          </div>
+          <div class="entry-detail">Figure recreations committed; updated visual outputs for the analysis.</div>
+          <div class="entry-hash">fab91c9</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-03-22</div>
+        <div class="entry-content">
+          <div class="entry-title">Added Stickman Test
+            <span class="tag tag-analysis">analysis</span>
+          </div>
+          <div class="entry-detail">Experimental "stickman test" added to hr-cancer.ipynb — quick sanity-check/mock analysis for pipeline validation.</div>
+          <div class="entry-hash">dd7d84a</div>
+        </div>
+      </div>
+
+      <div class="entry milestone">
+        <div class="entry-date">2026-03-22</div>
+        <div class="entry-content">
+          <div class="entry-title">Major Refactor of hr-cancer.ipynb — Full Unsupervised Pipeline
+            <span class="tag tag-milestone">MILESTONE</span>
+            <span class="tag tag-refactor">refactor</span>
+          </div>
+          <div class="entry-detail">
+            Comprehensive refactor of <code>Code/hr-cancer.ipynb</code> with the following additions:
+            <ul style="margin-top:6px; margin-left:18px;">
+              <li>Removed conditional skipping of unsupervised learning</li>
+              <li>Added normalization, PCA, and full clustering preprocessing</li>
+              <li>Leiden clustering with Louvain fallback implemented</li>
+              <li>TCR sequence clustering introduced</li>
+              <li>Gene expression module discovery pipeline added</li>
+              <li>Pseudobulk differential expression analysis added</li>
+              <li>Cluster marker computation function added</li>
+              <li>Enhanced visualization and output-saving mechanisms</li>
+              <li>Improved logging and error handling throughout</li>
+            </ul>
+          </div>
+          <div class="entry-hash">735f20d</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-03-23</div>
+        <div class="entry-content">
+          <div class="entry-title">Fixed OOM (Out of Memory)
+            <span class="tag tag-fix">fix</span>
+          </div>
+          <div class="entry-detail">Out-of-memory error fixed in hr-cancer.ipynb following the major refactor; memory allocation strategy updated for large-scale scRNA-seq processing.</div>
+          <div class="entry-hash">1cb71c6</div>
+        </div>
+      </div>
+
+      <div class="entry">
+        <div class="entry-date">2026-03-24</div>
+        <div class="entry-content">
+          <div class="entry-title">Updated README
+            <span class="tag tag-data">docs</span>
+          </div>
+          <div class="entry-detail">README updated with final project description, key insights, and reproducibility notes.</div>
+          <div class="entry-hash">90bf422</div>
+        </div>
+      </div>
+
+      <div class="entry milestone">
+        <div class="entry-date">2026-03-25</div>
+        <div class="entry-content">
+          <div class="entry-title">Kaggle Notebook — HR+ Cancer Version 70 (Latest); Fixed Visual Abstract
+            <span class="tag tag-milestone">MILESTONE</span>
+            <span class="tag tag-kaggle">kaggle</span>
+          </div>
+          <div class="entry-detail">
+            Kaggle Notebook HR+ Cancer Version 70 — the most recent and final Kaggle run — committed to the repository (+3 725 / −2 422 lines updated). Visual abstract fixed and finalized for presentation/submission.
+          </div>
+          <div class="entry-hash">aaa7cab / 3d5362e / 2ea27e8</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- PHASE 8 (current PR) -->
+  <div class="phase">
+    <div class="phase-header">Phase 8 — Lab Notebook &amp; Documentation (Mar 28, 2026)</div>
+    <div class="phase-body">
+
+      <div class="entry milestone">
+        <div class="entry-date">2026-03-28</div>
+        <div class="entry-content">
+          <div class="entry-title">Lab Notebook Created — This Document
+            <span class="tag tag-milestone">MILESTONE</span>
+          </div>
+          <div class="entry-detail">
+            A comprehensive, print-ready lab notebook (<code>lab_notebook.html</code>) created documenting the entire project from first commit (August 26, 2025) to present, based on the full git history of the repository with focus on <code>Code/hr-cancer.ipynb</code> and the overall analysis.
+          </div>
+          <div class="entry-hash">06eec6e</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========================================================= ANALYSIS SUMMARY -->
+  <h2>Analysis Method Summary</h2>
+  <div class="overview-box">
+    <h3 style="margin-top:0">Data</h3>
+    <p>Single-cell RNA-seq data from HR+ breast cancer patients (nab-paclitaxel + pembrolizumab treatment study). GEO accession GSM9061665 (features file: <code>GSM9061665_S1_features.tsv.gz</code>). Processed with AnnData/Scanpy pipeline.</p>
+
+    <h3>Clustering Methods Evaluated</h3>
+    <p>K-Means, HDBSCAN, Agglomerative Clustering, Leiden, Louvain. Best configuration selected automatically by silhouette score. Final best silhouette score: <strong>0.918</strong>.</p>
+
+    <h3>Machine Learning Pipeline</h3>
+    <p>Preprocessing: normalization, log-transform, highly variable gene selection, PCA. Dimensionality reduction: PCA → UMAP. Clustering → cluster labeling → marker gene identification (GZMB+, interferon signatures). Supervised classification: XGBoost (<code>XGBClassifierSK</code>), LASSO regression, transformer-based model (partially integrated). Pseudobulk differential expression analysis. TCR sequence clustering.</p>
+
+    <h3>Execution Environment</h3>
+    <p>Kaggle with 2× NVIDIA T4 GPUs. Total wall-time (~10 hours 47 min for full run). Local execution requires ≥30 GB RAM.</p>
+
+    <h3>Key Biological Findings</h3>
+    <p><strong>Responders:</strong> Expanded GZMB+ cytotoxic CD8 T cells, dynamic TCR clonality, interferon-driven monocyte and B cell signatures.<br>
+    <strong>Non-responders:</strong> Exhausted, static immune states.</p>
+  </div>
+
+  <!-- ========================================================= STATISTICS -->
+  <h2>Commit Statistics</h2>
+  <table class="summary-table">
+    <thead>
+      <tr><th>Metric</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Total commits in repository</td><td>~110</td></tr>
+      <tr><td>Commits touching hr-cancer.ipynb</td><td>31</td></tr>
+      <tr><td>Kaggle cloud runs (versioned)</td><td>v2 → v70 (versions 2, 5, 7, 12, 46–48, 52–54, 57, 59–60, 62, 70)</td></tr>
+      <tr><td>Project duration</td><td>Aug 26, 2025 → Mar 28, 2026 (~7 months)</td></tr>
+      <tr><td>Initial silhouette score</td><td>~0.3</td></tr>
+      <tr><td>Final silhouette score</td><td>0.918</td></tr>
+      <tr><td>Primary author</td><td>Anmol Singh Josan (ajosan@eastsideprep.org)</td></tr>
+      <tr><td>Primary notebook</td><td>Code/hr-cancer.ipynb (analysis), Code/Main.ipynb (user-facing)</td></tr>
+    </tbody>
+  </table>
+
+  <footer>
+    Anmol Singh Josan · Eastside Preparatory School · 
+    Unsupervised Learning for HR+ Breast Cancer RNA-Seq · 
+    Generated from git history · Last entry: March 28, 2026
+  </footer>
+
+</div><!-- end .page -->
+</body>
+</html>

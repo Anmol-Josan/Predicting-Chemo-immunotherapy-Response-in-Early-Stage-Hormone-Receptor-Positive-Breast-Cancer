@@ -1,4 +1,4 @@
-# Unsupervised-Learning-for-HR-Breast-Cancer-RNA-Sequencing
+# Predicting-Chemo-immunotherapy-Response-in-Early-Stage-Hormone-Receptor-Positive-Breast-Cancer
 
 This repository applies unsupervised machine learning to single-cell RNA sequencing (scRNA-seq) data from hormone receptor–positive (HR+) breast cancer patients treated with nab‑paclitaxel and pembrolizumab. The primary aim is to identify immune cell clusters and transcriptomic biomarkers associated with treatment response.
 

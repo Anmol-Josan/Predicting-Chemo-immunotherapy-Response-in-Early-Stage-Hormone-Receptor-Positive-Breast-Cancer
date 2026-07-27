@@ -1,0 +1,30 @@
+name: Push and Run on Kaggle
+
+on:
+  push:
+    branches:
+      - main  # Trigger workflow whenever you push to main
+
+jobs:
+  run-kaggle:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Kaggle API
+        run: pip install kaggle
+
+      - name: Push and run code on Kaggle
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: |
+          # Push the kernel code; Kaggle automatically kicks off execution upon push
+          kaggle kernels push -p .

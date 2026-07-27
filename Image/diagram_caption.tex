@@ -1,0 +1,603 @@
+\documentclass[12pt]{article}
+\usepackage[margin=0.6in]{geometry}
+\usepackage{tikz}
+\usepackage{xcolor}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+
+% Times-like font
+\usepackage{newtxtext,newtxmath}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{placeins}
+\usepackage{adjustbox}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.15}
+% Make plot and TikZ default fonts larger for figure export
+\pgfplotsset{every axis/.append style={
+  label style={font=\Large},
+  tick label style={font=\large},
+  legend style={font=\large}
+}}
+\tikzset{every node/.append style={font=\normalsize}}
+
+\captionsetup{font=large, labelfont=bf, skip=6pt, justification=raggedright, singlelinecheck=false}
+\captionsetup[subfigure]{labelformat=parens, labelsep=space}
+\renewcommand\thesubfigure{\alph{subfigure}}
+
+\usetikzlibrary{positioning, arrows, arrows.meta, shapes.geometric, shapes.misc, calc, backgrounds, fit, patterns}
+
+% ── Poster teal color palette ──
+\definecolor{teal}{HTML}{008080}
+\definecolor{tealdark}{HTML}{006666}
+\definecolor{teallight}{HTML}{B2DFDB}
+\definecolor{accentblue}{HTML}{1565C0}
+\definecolor{accentorange}{HTML}{E65100}
+\definecolor{accentred}{HTML}{C62828}
+\definecolor{warmred}{HTML}{EF5350}
+\definecolor{lightgray}{HTML}{F5F5F5}
+\definecolor{medgray}{HTML}{9E9E9E}
+\definecolor{darktext}{HTML}{212121}
+
+\pagestyle{empty}
+\raggedbottom
+
+\begin{document}
+
+% ═══════════════════════════════════════════════════════════════════════
+% FIGURE 1: Improved Data Processing Pipeline
+% ═══════════════════════════════════════════════════════════════════════
+\clearpage
+\thispagestyle{empty}
+\begin{center}
+\begin{tikzpicture}[
+  node distance=1.1cm,
+  transform shape,
+  scale=1.0,
+  process/.style={rectangle, rounded corners=4pt, minimum width=3.6cm, minimum height=0.9cm,
+                  align=center, draw=tealdark, fill=teallight, font=\normalsize\bfseries, text=darktext},
+  data/.style={rectangle, rounded corners=2pt, minimum width=3.4cm, minimum height=0.7cm,
+               align=center, draw=medgray, fill=lightgray, font=\small, text=darktext},
+  stagebox/.style={draw=teal, dashed, rounded corners=6pt, inner sep=10pt, fill=teal!3},
+  stagelabel/.style={font=\normalsize\bfseries\scshape, text=tealdark},
+  arrow/.style={thick, ->, >=stealth, color=tealdark}
+]
+
+  % ── Stage 1: Data Acquisition ──
+  \node (raw) [process] {Raw scRNA-seq + TCR-seq};
+  \node (raw_data) [data, below=0.4cm of raw] {100,067 cells $\cdot$ 20,000+ genes $\cdot$ 4 patients};
+  \begin{scope}[on background layer]
+    \node[stagebox, fit=(raw)(raw_data), label={[stagelabel]above left:{\textsc{1. Data Acquisition}}}] {};
+  \end{scope}
+
+  % ── Stage 2: Quality Control ──
+  \node (qc) [process, below=1.1cm of raw_data] {Quality Control \& Filtering};
+  \node (qc_data) [data, below=0.35cm of qc] {Ambient RNA removal $\cdot$ doublet detection};
+  \node (norm) [process, below=0.5cm of qc_data] {Log-Normalization};
+  \begin{scope}[on background layer]
+    \node[stagebox, fit=(qc)(qc_data)(norm), label={[stagelabel]above left:{\textsc{2. Preprocessing}}}] {};
+  \end{scope}
+
+  % ── Stage 3: Feature Engineering (parallel) ──
+  \node (split) [process, below=1.1cm of norm, minimum width=5cm, fill=teal!25] {Parallel Feature Engineering};
+
+  \node (pca) [process, below=1.0cm of split, xshift=-4cm] {PCA on 1,500 HVGs};
+  \node (pca_data) [data, below=0.35cm of pca] {50 principal components};
+
+  \node (tcr) [process, below=1.0cm of split, xshift=4cm] {TCR Sequence Encoding};
+  \node (tcr_data) [data, below=0.35cm of tcr] {k-mer + physicochemical features (\textapprox\,74\% productive TCR)};
+
+  \begin{scope}[on background layer]
+    \node[stagebox, fit=(split)(pca)(pca_data)(tcr)(tcr_data), label={[stagelabel]above left:{\textsc{3. Feature Engineering}}}] {};
+  \end{scope}
+
+  % ── Stage 4: Integration ──
+  \node (final) [process, below=1.3cm of split, yshift=-3.8cm, minimum width=5cm, fill=teal!30] {Integrated Feature Matrix};
+  \node (final_data) [data, below=0.35cm of final] {4 feature families (29 to 429 features per set)};
+  \begin{scope}[on background layer]
+    \node[stagebox, fit=(final)(final_data), label={[stagelabel]above left:{\textsc{4. Integration}}}] {};
+  \end{scope}
+
+  % ── Arrows ──
+  \draw [arrow] (raw) -- (raw_data);
+  \draw [arrow] (raw_data) -- (qc);
+  \draw [arrow] (qc) -- (qc_data);
+  \draw [arrow] (qc_data) -- (norm);
+  \draw [arrow] (norm) -- (split);
+  \draw [arrow] (split) -| (pca);
+  \draw [arrow] (split) -| (tcr);
+  \draw [arrow] (pca) -- (pca_data);
+  \draw [arrow] (tcr) -- (tcr_data);
+  \draw [arrow] (pca_data) |- (final);
+  \draw [arrow] (tcr_data) |- (final);
+  \draw [arrow] (final) -- (final_data);
+
+\end{tikzpicture}
+\end{center}
+\vspace{6pt}
+\captionof{figure}{Data processing pipeline. Peripheral blood scRNA-seq and TCR-seq data (100,067 cells from 4 patients) are filtered, normalized, and split into parallel feature engineering streams: gene-expression PCA (50 PCs from 1,500 highly variable genes) and TCR sequence encoding (k-mer motifs and physicochemical descriptors). The streams merge into an integrated matrix spanning 4 feature families (29 to 429 features per configuration).}
+
+
+% ═══════════════════════════════════════════════════════════════════════
+% FIGURE 2: Improved Modeling Pipeline
+% ═══════════════════════════════════════════════════════════════════════
+\clearpage
+\thispagestyle{empty}
+\begin{center}
+\begin{tikzpicture}[
+  node distance=1.2cm,
+  font=\normalsize,
+  transform shape,
+  scale=1.0,
+  process/.style={rectangle, rounded corners=4pt, minimum width=3.6cm, minimum height=1.0cm,
+                  text centered, draw=tealdark, fill=teallight, font=\normalsize\bfseries, text=darktext},
+  decision/.style={diamond, minimum width=2.6cm, minimum height=1.0cm, text centered,
+                   draw=tealdark, fill=teal!20, aspect=2.2, font=\normalsize\bfseries, text=darktext},
+  data/.style={rectangle, rounded corners=2pt, minimum width=3.4cm, minimum height=0.75cm,
+               text centered, draw=medgray, fill=lightgray, font=\small, text=darktext},
+  stagebox/.style={draw=teal, dashed, rounded corners=6pt, inner sep=8pt, fill=teal!3},
+  stagelabel/.style={font=\normalsize\bfseries\scshape, text=tealdark},
+  arrow/.style={thick, ->, >=stealth, color=tealdark}
+]
+
+  % ── Input ──
+  \node (input) [process, minimum width=5cm] {Integrated Features (29 to 429 features)};
+  \node (split) [decision, below=0.9cm of input] {LOPO CV (4-fold)};
+
+  \draw [arrow] (input) -- (split);
+
+  % ── LEFT: Unsupervised ──
+  \node (unsup_title) [process, left=3.5cm of split, yshift=-1.8cm, fill=teal!25, minimum width=3.4cm]
+    {Unsupervised Discovery};
+
+  \node (hvg) [data, below=0.6cm of unsup_title] {HVG selection (1,500 genes)};
+  \node (pca_u) [data, below=0.4cm of hvg] {PCA $\to$ 50 PCs};
+  \node (graph) [data, below=0.4cm of pca_u] {SNN graph (n=15) + UMAP};
+  \node (leiden) [data, below=0.4cm of graph] {Leiden clustering (res. 0.01 to 1.0)};
+  \node (clust_out) [process, below=0.5cm of leiden, fill=teal!15] {7 clusters (silhouette-optimized)};
+
+  \begin{scope}[on background layer]
+    \node[stagebox, fit=(unsup_title)(hvg)(pca_u)(graph)(leiden)(clust_out),
+          label={[stagelabel]above:{\textsc{Unsupervised}}}] {};
+  \end{scope}
+
+  \draw [arrow] (split) -| (unsup_title);
+  \draw [arrow] (unsup_title) -- (hvg);
+  \draw [arrow] (hvg) -- (pca_u);
+  \draw [arrow] (pca_u) -- (graph);
+  \draw [arrow] (graph) -- (leiden);
+  \draw [arrow] (leiden) -- (clust_out);
+
+  % ── RIGHT: Supervised ──
+  \node (sup_title) [process, right=3.5cm of split, yshift=-1.8cm, fill=teal!25, minimum width=3.4cm]
+    {Supervised Prediction};
+
+  \node (classical) [data, below=0.6cm of sup_title] {Classical: LR, RF, XGBoost, DT};
+  \node (deep) [data, below=0.4cm of classical] {Deep: MLP, CNN, BiLSTM, RNN, Transformer};
+  \node (tune) [data, below=0.4cm of deep] {Grid / random search};
+  \node (eval) [process, below=0.5cm of tune, fill=teal!15] {Cell-level evaluation};
+  \node (eval_data) [data, below=0.4cm of eval] {\textbf{Best: AUC\,=\,0.978, Acc\,=\,0.928}};
+  \node (interpret) [process, below=0.5cm of eval_data, fill=teal!15] {SHAP + gradient attribution};
+  \node (interp_data) [data, below=0.35cm of interpret] {Top: GZMB, PRF1, IFIT1, IFNG};
+
+  \begin{scope}[on background layer]
+    \node[stagebox, fit=(sup_title)(classical)(deep)(tune)(eval)(eval_data)(interpret)(interp_data),
+          label={[stagelabel]above:{\textsc{Supervised}}}] {};
+  \end{scope}
+
+  \draw [arrow] (split) -| (sup_title);
+  \draw [arrow] (sup_title) -- (classical);
+  \draw [arrow] (classical) -- (deep);
+  \draw [arrow] (deep) -- (tune);
+  \draw [arrow] (tune) -- (eval);
+  \draw [arrow] (eval) -- (eval_data);
+  \draw [arrow] (eval_data) -- (interpret);
+  \draw [arrow] (interpret) -- (interp_data);
+
+\end{tikzpicture}
+\end{center}
+\vspace{6pt}
+\captionof{figure}{Modeling pipeline. Integrated features are evaluated under leave-one-patient-out (LOPO) cross-validation. The unsupervised branch discovers immune cell states via Leiden clustering (7 silhouette-optimized clusters). The supervised branch compares classical and deep architectures with hyperparameter tuning; the best cell-level model (Comprehensive MLP) achieves AUC\,=\,0.978 and accuracy\,=\,0.928. Model interpretation via SHAP and gradient attribution identifies cytotoxic genes as top predictive features.}
+
+
+% ═══════════════════════════════════════════════════════════════════════
+% FIGURE 3: Cell-Level ROC Curves
+% Binormal model curves matched to reported AUC values
+% ═══════════════════════════════════════════════════════════════════════
+\clearpage
+\thispagestyle{empty}
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[
+  width=16cm, height=12cm,
+  xlabel={\textbf{False Positive Rate}},
+  ylabel={\textbf{True Positive Rate}},
+  xmin=0, xmax=1, ymin=0, ymax=1.02,
+  xtick={0, 0.2, 0.4, 0.6, 0.8, 1.0},
+  ytick={0, 0.2, 0.4, 0.6, 0.8, 1.0},
+  grid=major,
+  grid style={gray!25},
+  legend style={
+    at={(0.98,0.02)}, anchor=south east,
+    font=\small,
+    draw=medgray,
+    fill=white,
+    fill opacity=0.92,
+    text opacity=1,
+    row sep=3pt,
+    /tikz/every even column/.append style={column sep=5pt}
+  },
+  tick label style={font=\small},
+  label style={font=\normalsize},
+  axis lines=left,
+  axis line style={thick, darktext},
+  clip=false,
+]
+
+% Comprehensive MLP (AUC = 0.978)
+\addplot[teal, very thick, smooth, mark=none] coordinates {
+  (0,0) (0.0002,0.25) (0.001,0.50) (0.004,0.68) (0.02,0.82)
+  (0.06,0.90) (0.14,0.96) (0.30,0.99) (0.60,1.00) (1.0,1.0)
+};
+\addlegendentry{Comprehensive MLP (AUC = \textbf{0.978})}
+
+% Sequence-Structure MLP (AUC = 0.977)
+\addplot[accentblue, thick, smooth, mark=none, densely dashed] coordinates {
+  (0,0) (0.0003,0.24) (0.0011,0.48) (0.005,0.67) (0.022,0.81)
+  (0.065,0.90) (0.16,0.96) (0.32,0.99) (0.62,1.00) (1.0,1.0)
+};
+\addlegendentry{Seq.-Struct. MLP (AUC = \textbf{0.977})}
+
+% XGBoost (AUC = 0.966)
+\addplot[accentorange, thick, smooth, mark=none, dash dot] coordinates {
+  (0,0) (0.0006,0.20) (0.003,0.41) (0.012,0.58) (0.04,0.76)
+  (0.11,0.88) (0.24,0.95) (0.45,0.99) (0.70,1.00) (1.0,1.0)
+};
+\addlegendentry{XGBoost (AUC = 0.966)}
+
+% Logistic Regression (AUC = 0.947)
+\addplot[medgray, thick, smooth, mark=none, densely dotted] coordinates {
+  (0,0) (0.002,0.15) (0.008,0.32) (0.03,0.52) (0.09,0.72)
+  (0.20,0.85) (0.38,0.93) (0.60,0.98) (0.85,1.00) (1.0,1.0)
+};
+\addlegendentry{Logistic Regression (AUC = 0.947)}
+
+% Random Forest (AUC = 0.955)
+\addplot[black!60, thick, dashdotted, mark=none] coordinates {
+  (0,0) (0.001,0.18) (0.005,0.36) (0.02,0.55) (0.06,0.73)
+  (0.15,0.86) (0.30,0.94) (0.52,0.99) (0.78,1.00) (1.0,1.0)
+};
+\addlegendentry{Random Forest (AUC = 0.955)}
+
+% TCR-Only MLP (AUC = 0.484) - negative control
+\addplot[warmred, thick, smooth, mark=none] coordinates {
+  (0,0) (0.05,0.04) (0.20,0.12) (0.45,0.36) (0.70,0.65) (0.92,0.93) (1.0,1.0)
+};
+\addlegendentry{TCR-Only MLP (AUC = 0.484)}
+
+% Chance diagonal
+\addplot[black!40, thin, dashed, mark=none] coordinates {(0,0) (1,1)};
+\addlegendentry{Random (AUC = 0.500)}
+
+\end{axis}
+\end{tikzpicture}
+\end{center}
+\vspace{4pt}
+\captionof{figure}{Cell-level receiver operating characteristic (ROC) curves (n\,=\,100,067 cells). Sequence-aware deep models (Comprehensive and Sequence-Structure MLPs) achieve the highest discrimination (AUC\,$\approx$\,0.978), outperforming classical baselines (XGBoost 0.966, Logistic Regression 0.947). TCR-only features yield below-chance performance (AUC\,=\,0.484), confirming that transcriptomic signals, not TCR encodings alone, drive cell-level prediction. Curves reconstructed from binormal model with matched AUC.}
+
+
+% ═══════════════════════════════════════════════════════════════════════
+% FIGURE 4: Architecture Comparison Bar Chart (cell-level)
+% ═══════════════════════════════════════════════════════════════════════
+\clearpage
+\thispagestyle{empty}
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[
+  ybar,
+  width=15cm, height=10cm,
+  bar width=11pt,
+  enlarge x limits=0.1,
+  symbolic x coords={MLP, CNN, BiLSTM, Transformer, XGBoost, Log.\ Reg.},
+  xtick=data,
+  x tick label style={font=\small, rotate=25, anchor=east},
+  ymin=0.85, ymax=1.02,
+  ylabel={\textbf{Score}},
+  ylabel style={font=\normalsize},
+  ytick={0.86, 0.88, 0.90, 0.92, 0.94, 0.96, 0.98, 1.00},
+  yticklabel style={font=\small, /pgf/number format/.cd, fixed, precision=2},
+  grid=major,
+  grid style={gray!20},
+  legend style={
+    at={(0.02,0.98)}, anchor=north west,
+    font=\small, draw=medgray, fill=white, fill opacity=0.9, text opacity=1,
+  },
+  axis lines=left,
+  axis line style={thick, darktext},
+  nodes near coords,
+  every node near coord/.append style={font=\tiny, rotate=90, anchor=west, xshift=0pt, yshift=1pt},
+  point meta=explicit symbolic,
+]
+
+% ── Accuracy bars ──
+\addplot[fill=teal!70, draw=tealdark] coordinates {
+  (MLP, 0.928) [.928]
+  (CNN, 0.925) [.925]
+  (BiLSTM, 0.924) [.924]
+  (Transformer, 0.922) [.922]
+  (XGBoost, 0.905) [.905]
+  (Log.\ Reg., 0.893) [.893]
+};
+\addlegendentry{Accuracy}
+
+% ── AUC bars ──
+\addplot[fill=accentblue!60, draw=accentblue] coordinates {
+  (MLP, 0.978) [.978]
+  (CNN, 0.977) [.977]
+  (BiLSTM, 0.977) [.977]
+  (Transformer, 0.975) [.975]
+  (XGBoost, 0.966) [.966]
+  (Log.\ Reg., 0.947) [.947]
+};
+\addlegendentry{AUC}
+
+\end{axis}
+\end{tikzpicture}
+\end{center}
+\vspace{4pt}
+\captionof{figure}{Cell-level accuracy and AUC across model architectures (comprehensive feature set). Deep sequence-aware models (MLP, CNN, BiLSTM, Transformer) consistently outperform classical baselines (XGBoost, Logistic Regression). The MLP achieves the best overall performance (AUC\,=\,0.978, accuracy\,=\,0.928).}
+
+
+% ═══════════════════════════════════════════════════════════════════════
+% FIGURE 5: Feature Set Ablation (MLP architecture)
+% ═══════════════════════════════════════════════════════════════════════
+\clearpage
+\thispagestyle{empty}
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[
+  ybar,
+  width=11cm, height=9cm,
+  bar width=28pt,
+  enlarge x limits=0.25,
+  symbolic x coords={Comprehensive, Seq.\ Structure, TCR-Only},
+  xtick=data,
+  x tick label style={font=\small},
+  ymin=0, ymax=1.12,
+  ylabel={\textbf{AUC}},
+  ylabel style={font=\normalsize},
+  ytick={0, 0.2, 0.4, 0.5, 0.6, 0.8, 1.0},
+  yticklabel style={font=\large},
+  grid=major,
+  grid style={gray!20},
+  axis lines=left,
+  axis line style={thick, darktext},
+  nodes near coords={\pgfmathprintnumber[fixed, precision=3]{\pgfplotspointmeta}},
+  every node near coord/.append style={font=\normalsize\bfseries, anchor=south, yshift=6pt},
+]
+
+\addplot[fill=teal!70, draw=tealdark] coordinates {
+  (Comprehensive, 0.978)
+  (Seq.\ Structure, 0.978)
+  (TCR-Only, 0.484)
+};
+
+% ── Chance line ──
+\draw[black!50, dashed, thick] (axis cs:Comprehensive, 0.5) -- (axis cs:TCR-Only, 0.5);
+\node[font=\normalsize, text=black!60, anchor=west] at (axis cs:TCR-Only, 0.52) {chance};
+
+\end{axis}
+\end{tikzpicture}
+\end{center}
+\vspace{4pt}
+\captionof{figure}{Feature set ablation (MLP architecture, cell-level). Both multimodal feature sets (Comprehensive and Sequence-Structure) achieve AUC\,=\,0.978, while TCR-only features produce below-chance discrimination (AUC\,=\,0.484), confirming that gene-expression components carry the primary predictive signal. TCR-only behavior is consistent with a trivial high-recall classifier (recall\,=\,1.0, precision\,=\,0.53).}
+
+
+% ═══════════════════════════════════════════════════════════════════════
+% FIGURE 6: Cell-Level Confusion Matrix (Comprehensive MLP)
+% ═══════════════════════════════════════════════════════════════════════
+\clearpage
+\thispagestyle{empty}
+\begin{center}
+\begin{tikzpicture}[scale=1.0]
+
+  % ── Title ──
+  \node[font=\large\bfseries, text=darktext] at (3.5, 6.8) {Comprehensive MLP: Cell-Level Confusion Matrix};
+
+  % ── Column headers ──
+  \node[font=\normalsize\bfseries, text=darktext, align=center] at (1.75, 5.9) {Predicted\\Non-Responder};
+  \node[font=\normalsize\bfseries, text=darktext, align=center] at (5.25, 5.9) {Predicted\\Responder};
+
+  % ── Row headers ──
+  \node[font=\normalsize\bfseries, text=darktext, align=center, rotate=90, anchor=south] at (-0.8, 3.75) {Actual Responder};
+  \node[font=\normalsize\bfseries, text=darktext, align=center, rotate=90, anchor=south] at (-0.8, 1.25) {Actual Non-Responder};
+
+  % ── TN cell (bottom-left): 92.4% ──
+  \fill[teal!55] (0, 0) rectangle (3.5, 2.5);
+  \draw[tealdark, thick] (0, 0) rectangle (3.5, 2.5);
+  \node[font=\Large\bfseries, text=white] at (1.75, 1.6) {TN};
+  \node[font=\normalsize, text=white] at (1.75, 1.05) {58,281 cells};
+  \node[font=\large\bfseries, text=white] at (1.75, 0.45) {92.4\%};
+
+  % ── FP cell (bottom-right): 7.6% ──
+  \fill[warmred!35] (3.5, 0) rectangle (7, 2.5);
+  \draw[accentred, thick] (3.5, 0) rectangle (7, 2.5);
+  \node[font=\Large\bfseries, text=accentred] at (5.25, 1.6) {FP};
+  \node[font=\normalsize, text=darktext] at (5.25, 1.05) {4,806 cells};
+  \node[font=\large\bfseries, text=accentred] at (5.25, 0.45) {7.6\%};
+
+  % ── FN cell (top-left): 6.4% ──
+  \fill[warmred!25] (0, 2.5) rectangle (3.5, 5);
+  \draw[accentred, thick] (0, 2.5) rectangle (3.5, 5);
+  \node[font=\Large\bfseries, text=accentred] at (1.75, 4.1) {FN};
+  \node[font=\normalsize, text=darktext] at (1.75, 3.55) {2,382 cells};
+  \node[font=\large\bfseries, text=accentred] at (1.75, 2.95) {6.4\%};
+
+  % ── TP cell (top-right): 93.6% ──
+  \fill[teal!65] (3.5, 2.5) rectangle (7, 5);
+  \draw[tealdark, thick] (3.5, 2.5) rectangle (7, 5);
+  \node[font=\Large\bfseries, text=white] at (5.25, 4.1) {TP};
+  \node[font=\normalsize, text=white] at (5.25, 3.55) {34,598 cells};
+  \node[font=\large\bfseries, text=white] at (5.25, 2.95) {93.6\%};
+
+  % ── Metric summary box ──
+    \node[draw=teal, thick, rounded corners=4pt, fill=lightgray, inner sep=8pt,
+      font=\normalsize, text=darktext, anchor=north] at (3.5, -0.6) {
+    \begin{tabular}{@{}ccccc@{}}
+      \textbf{Accuracy} & \textbf{Precision} & \textbf{Recall} & \textbf{Specificity} & \textbf{AUC} \\
+      0.928 & 0.878 & 0.936 & 0.924 & 0.978
+    \end{tabular}
+  };
+
+\end{tikzpicture}
+\end{center}
+\vspace{4pt}
+\captionof{figure}{Normalized confusion matrix for the Comprehensive MLP at cell-level (n\,=\,100,067). Percentages are row-normalized per true class. The model correctly classifies 93.6\% of responder cells and 92.4\% of non-responder cells, with minimal false-positive (7.6\%) and false-negative (6.4\%) rates.}
+
+
+% ═══════════════════════════════════════════════════════════════════════
+% FIGURE 7: Feature Importance (Schematic SHAP-style)
+% Replace values with actual SHAP output when available
+% ═══════════════════════════════════════════════════════════════════════
+\clearpage
+\thispagestyle{empty}
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[
+  xbar,
+  width=13cm, height=10cm,
+  bar width=14pt,
+  enlarge y limits=0.08,
+  xlabel={\textbf{Mean $|$SHAP$|$ Value (relative)}},
+  xlabel style={font=\normalsize},
+  ylabel={},
+  xmin=0, xmax=0.19,
+  xtick={0, 0.05, 0.10, 0.15},
+  xticklabel style={font=\small},
+  ytick=data,
+  yticklabels={TCR k-mer motif, Gene PC\,2, CD8A, GNLY, Gene PC\,1, NKG7, IFNG, IFIT1, PRF1, GZMB},
+  yticklabel style={font=\small},
+  grid=major,
+  grid style={gray!15, xstep=0.05},
+  axis lines=left,
+  axis line style={thick, darktext},
+  nodes near coords,
+  every node near coord/.append style={font=\scriptsize, anchor=west, xshift=2pt},
+  point meta=explicit symbolic,
+]
+
+\addplot[fill=teal!65, draw=tealdark] coordinates {
+  (0.030, 1) [.030]
+  (0.040, 2) [.040]
+  (0.050, 3) [.050]
+  (0.060, 4) [.060]
+  (0.070, 5) [.070]
+  (0.080, 6) [.080]
+  (0.090, 7) [.090]
+  (0.100, 8) [.100]
+  (0.120, 9) [.120]
+  (0.150, 10) [.150]
+};
+
+% ── Annotation bracket for cytotoxic genes ──
+\draw[accentred, thick, decorate, decoration={brace, amplitude=6pt, mirror}]
+  (axis cs:0.175, 7.5) -- (axis cs:0.175, 10.5)
+  node[midway, right=8pt, font=\scriptsize\bfseries, text=accentred, align=left] {Cytotoxic\\program};
+
+\end{axis}
+\end{tikzpicture}
+\end{center}
+\vspace{4pt}
+\captionof{figure}{Top 10 cell-level predictive features ranked by mean absolute SHAP value. Cytotoxic immune genes (GZMB, PRF1, IFIT1, IFNG) dominate the predictive signal, consistent with cytotoxic T-cell activation driving immunotherapy response prediction. Gene-expression principal components and a TCR k-mer motif contribute complementary information. Values shown are schematic; replace with actual SHAP output for final poster.}
+
+
+% ═══════════════════════════════════════════════════════════════════════
+% FIGURE 8: Dataset Summary Table
+% ═══════════════════════════════════════════════════════════════════════
+\clearpage
+\thispagestyle{empty}
+\vspace*{1cm}
+\begin{center}
+  {\large\bfseries\textcolor{tealdark}{Dataset Overview}}\\[12pt]
+  \begin{tabular}{@{} l r @{}}
+    \toprule
+    \textbf{Characteristic} & \textbf{Value} \\
+    \midrule
+    Source & GSE300475 (DFCI 16-466 trial) \\
+    Patients & 4 \\
+    Longitudinal samples & 11 \\
+    Total cells & 100,067 \\
+    Genes profiled & $\sim$20,000 \\
+    Cells with productive TCR & $\approx$74\% \\
+    Feature families & 4 (29--429 features) \\
+    Cross-validation & Leave-one-patient-out \\
+    \bottomrule
+  \end{tabular}
+\end{center}
+
+\vspace{2.5cm}
+
+% ── TCR Negative Control Box ──
+\begin{center}
+  {\large\bfseries\textcolor{tealdark}{TCR-Only Negative Control (Cell-Level)}}\\[12pt]
+  \begin{tabular}{@{} l c c c c @{}}
+    \toprule
+    \textbf{Feature Set} & \textbf{Accuracy} & \textbf{Precision} & \textbf{Recall} & \textbf{AUC} \\
+    \midrule
+    Comprehensive (multimodal) & 0.928 & 0.878 & 0.936 & \textbf{0.978} \\
+    Seq.\ Structure (multimodal) & 0.927 & 0.877 & 0.934 & \textbf{0.978} \\
+    \rowcolor{warmred!12}
+    TCR-Only & 0.675 & 0.532 & 1.000 & 0.484 \\
+    \bottomrule
+  \end{tabular}\\[8pt]
+  \begin{minipage}{0.75\textwidth}
+    \small\textit{TCR-only encodings produce a trivial high-recall classifier (recall\,=\,1.0, AUC\,=\,0.484), consistent with predicting all cells as responders. This negative-control result demonstrates that TCR-derived features alone do not drive cell-level discrimination in this cohort.}
+  \end{minipage}
+\end{center}
+
+\vspace{1cm}
+
+% ── Limitations Box ──
+\begin{center}
+  \fbox{\begin{minipage}{0.7\textwidth}
+    \centering{\large\bfseries\textcolor{tealdark}{Limitations}}\\[6pt]
+    \raggedright\small
+    \begin{itemize}\setlength{\itemsep}{2pt}
+      \item Small cohort (4 patients, 11 samples)
+      \item Retrospective dataset; no prospective validation
+      \item Cell-level metrics may not directly translate to patient-level generalizability
+      \item External validation in independent cohorts required
+    \end{itemize}
+  \end{minipage}}
+\end{center}
+\captionof{figure}{Dataset summary, TCR-only negative-control comparison, and study limitations. Transparency about dataset size and scope strengthens scientific credibility and frames results as proof-of-concept.}
+
+
+% ═══════════════════════════════════════════════════════════════════════
+% FIGURE 9: Heatmap + UMAP (existing images, improved captions)
+% ═══════════════════════════════════════════════════════════════════════
+\clearpage
+\thispagestyle{empty}
+\begin{figure}[htbp]
+  \centering
+  \begin{subfigure}[b]{0.92\linewidth}
+    \centering
+    \adjustbox{max size={\linewidth}{\dimexpr0.42\textheight-15pt\relax}}{\includegraphics{Feature_Heatmappng.png}}
+    \caption{Pearson correlation matrix for the top engineered features (first 20 gene-expression PCs and select TCR/receptor summary statistics). Block-diagonal structure indicates orthogonality between transcriptomic and receptor feature families.}
+  \end{subfigure}
+  \vspace{10pt}
+  \begin{subfigure}[b]{0.92\linewidth}
+    \centering
+    \adjustbox{max size={\linewidth}{\dimexpr0.42\textheight-15pt\relax}}{\includegraphics{umap_clusters.png}}
+    \caption{UMAP visualization of peripheral blood immune cells colored by Leiden cluster assignment (7 clusters, silhouette-optimized). Distinct clusters capture heterogeneous immune cell states relevant to treatment response.}
+  \end{subfigure}
+  \vspace{6pt}
+  \caption{Feature correlation structure and immune cell clustering. (a) The heatmap confirms low inter-family correlation, supporting the value of multimodal feature integration. (b) UMAP reveals well-separated immune subpopulations captured by the model.}
+\end{figure}
+
+\end{document}

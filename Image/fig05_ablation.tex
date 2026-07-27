@@ -1,0 +1,42 @@
+\documentclass[border=24pt]{standalone}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.15}
+\usepackage{xcolor}
+\usepackage{newtxtext,newtxmath}
+\definecolor{teal}{HTML}{008080}
+\definecolor{tealdark}{HTML}{006666}
+\definecolor{teallight}{HTML}{B2DFDB}
+\definecolor{accentblue}{HTML}{1565C0}
+\definecolor{accentorange}{HTML}{E65100}
+\definecolor{accentred}{HTML}{C62828}
+\definecolor{warmred}{HTML}{EF5350}
+\definecolor{lightgray}{HTML}{F5F5F5}
+\definecolor{medgray}{HTML}{9E9E9E}
+\definecolor{darktext}{HTML}{212121}
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[
+  ybar,
+  width=15.8cm,height=11.0cm,
+  ymin=0,ymax=1.16,
+  symbolic x coords={Comprehensive,Seq. Structure,TCR-Only},
+  xtick=data,
+  x tick label style={font=\Large},
+  yticklabel style={font=\Large},
+  ylabel={\textbf{AUC}}, ylabel style={font=\Large},
+  bar width=22pt,
+  enlarge x limits=0.28,
+  enlarge y limits={upper,value=0.15},
+  grid=major, grid style={gray!20},
+  axis line style={thick,darktext},
+  nodes near coords,
+  every node near coord/.append style={font=\normalsize\bfseries,anchor=south,yshift=2pt},
+  clip=true
+]
+\addplot+[fill=teal!70,draw=tealdark] coordinates {(Comprehensive,0.978) (Seq. Structure,0.978) (TCR-Only,0.484)};
+\draw[black!50,dashed,thick] (axis cs:Comprehensive,0.5) -- (axis cs:TCR-Only,0.5);
+\node[font=\normalsize,text=black!65,anchor=west] at (axis cs:TCR-Only,0.53) {chance};
+\end{axis}
+\end{tikzpicture}
+\end{document}

@@ -1,0 +1,59 @@
+\documentclass[border=24pt]{standalone}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit,backgrounds,calc,shapes.geometric}
+\usepackage{xcolor}
+\usepackage{newtxtext,newtxmath}
+\definecolor{teal}{HTML}{008080}
+\definecolor{tealdark}{HTML}{006666}
+\definecolor{teallight}{HTML}{B2DFDB}
+\definecolor{accentblue}{HTML}{1565C0}
+\definecolor{accentorange}{HTML}{E65100}
+\definecolor{accentred}{HTML}{C62828}
+\definecolor{warmred}{HTML}{EF5350}
+\definecolor{lightgray}{HTML}{F5F5F5}
+\definecolor{medgray}{HTML}{9E9E9E}
+\definecolor{darktext}{HTML}{212121}
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.75cm and 1.7cm,
+  box/.style={rectangle, rounded corners=5pt, draw=tealdark, fill=teallight, minimum width=4.4cm, minimum height=1.0cm, align=center, font=\large\bfseries, text=darktext},
+  sub/.style={rectangle, rounded corners=3pt, draw=medgray, fill=white, minimum width=4.4cm, minimum height=0.85cm, align=center, font=\normalsize, text=darktext},
+  decision/.style={diamond, draw=tealdark, fill=teal!20, aspect=2.1, minimum width=3.1cm, minimum height=1.0cm, align=center, font=\large\bfseries, text=darktext},
+  stage/.style={draw=teal, dashed, rounded corners=8pt, inner sep=8pt, fill=teal!3},
+  arr/.style={thick, -{Stealth[length=2.8mm]}, draw=tealdark}
+]
+\node[box, minimum width=6.0cm] (input) {Integrated Features (29--429)};
+\node[decision, below=1.0cm of input] (split) {LOPO CV};
+\draw[arr] (input) -- (split);
+
+\node[box, below left=1.2cm and 3.0cm of split, fill=teal!25] (utitle) {Unsupervised Discovery};
+\node[sub, below=of utitle] (u1) {HVG selection (1,500 genes)};
+\node[sub, below=of u1] (u2) {PCA to 50 PCs};
+\node[sub, below=of u2] (u3) {SNN graph (n=15) + UMAP};
+\node[box, below=of u3, fill=teal!15] (u4) {Leiden clusters (n=7)};
+
+\node[box, below right=1.2cm and 3.0cm of split, fill=teal!25] (stitle) {Supervised Prediction};
+\node[sub, below=of stitle] (s1) {ML: LR, RF, XGBoost, DT};
+\node[sub, below=of s1] (s2) {DL: MLP, CNN, BiLSTM, RNN, Transformer};
+\node[sub, below=of s2] (s3) {Hyperparameter search};
+\node[box, below=of s3, fill=teal!15] (s4) {Best: AUC 0.978, Acc 0.928};
+\node[sub, below=of s4] (s5) {Interpretation: SHAP + gradient attribution};
+
+\draw[arr] (split.south west) -- (utitle.north);
+\draw[arr] (split.south east) -- (stitle.north);
+\draw[arr] (utitle)--(u1);
+\draw[arr] (u1)--(u2);
+\draw[arr] (u2)--(u3);
+\draw[arr] (u3)--(u4);
+\draw[arr] (stitle)--(s1);
+\draw[arr] (s1)--(s2);
+\draw[arr] (s2)--(s3);
+\draw[arr] (s3)--(s4);
+\draw[arr] (s4)--(s5);
+
+\begin{scope}[on background layer]
+\node[stage, fit=(utitle)(u1)(u2)(u3)(u4), label={[font=\large\bfseries\scshape,text=tealdark]above:Unsupervised}] {};
+\node[stage, fit=(stitle)(s1)(s2)(s3)(s4)(s5), label={[font=\large\bfseries\scshape,text=tealdark]above:Supervised}] {};
+\end{scope}
+\end{tikzpicture}
+\end{document}

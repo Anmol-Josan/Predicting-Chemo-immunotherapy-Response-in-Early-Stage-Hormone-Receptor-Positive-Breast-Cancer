@@ -1,0 +1,63 @@
+\documentclass[border=24pt]{standalone}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit,backgrounds}
+\usepackage{xcolor}
+\usepackage{newtxtext,newtxmath}
+\definecolor{teal}{HTML}{008080}
+\definecolor{tealdark}{HTML}{006666}
+\definecolor{teallight}{HTML}{B2DFDB}
+\definecolor{accentblue}{HTML}{1565C0}
+\definecolor{accentorange}{HTML}{E65100}
+\definecolor{accentred}{HTML}{C62828}
+\definecolor{warmred}{HTML}{EF5350}
+\definecolor{lightgray}{HTML}{F5F5F5}
+\definecolor{medgray}{HTML}{9E9E9E}
+\definecolor{darktext}{HTML}{212121}
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.9cm and 1.8cm,
+  font=\large,
+  box/.style={rectangle, rounded corners=5pt, draw=tealdark, fill=teallight, minimum width=4.9cm, minimum height=1.1cm, align=center, font=\large\bfseries, text=darktext},
+  sub/.style={rectangle, rounded corners=3pt, draw=medgray, fill=white, minimum width=4.9cm, minimum height=0.9cm, align=center, font=\normalsize, text=darktext},
+  stage/.style={draw=teal, dashed, rounded corners=8pt, inner sep=9pt, fill=teal!3},
+  arr/.style={thick, -{Stealth[length=3mm]}, draw=tealdark}
+]
+\node[box] (raw) {Raw scRNA-seq + TCR-seq};
+\node[sub, below=of raw] (raws) {100,067 cells, 4 patients, 20k+ genes};
+\node[box, below=1.0cm of raws] (qc) {Quality Control and Normalization};
+\node[sub, below=of qc] (qcs) {Ambient RNA removal, doublet filtering, log-normalization};
+\node[box, below=1.0cm of qcs, fill=teal!25] (split) {Parallel Feature Engineering};
+
+\node[box, below left=1.4cm and 2.4cm of split] (pca) {Transcriptomics Branch};
+\node[sub, below=of pca] (pcas) {HVG selection (1,500) and PCA (50 PCs)};
+
+\node[box, below right=1.4cm and 2.4cm of split] (tcr) {TCR Branch};
+\node[sub, below=of tcr] (tcrs) {k-mer and physicochemical descriptors};
+
+\node[box, below=2.1cm of split, minimum width=6.2cm, fill=teal!30] (integrated) {Integrated Multimodal Matrix};
+\node[sub, below=of integrated, minimum width=6.2cm] (ints) {4 feature families (29--429 features)};
+
+\draw[arr] (raw) -- (raws);
+\draw[arr] (raws) -- (qc);
+\draw[arr] (qc) -- (qcs);
+\draw[arr] (qcs) -- (split);
+\draw[arr] (split.south west) -- (pca.north);
+\draw[arr] (split.south east) -- (tcr.north);
+\draw[arr] (pca) -- (pcas);
+\draw[arr] (tcr) -- (tcrs);
+\draw[arr] (pcas.south) |- (integrated.west);
+\draw[arr] (tcrs.south) |- (integrated.east);
+\draw[arr] (integrated) -- (ints);
+
+\begin{scope}[on background layer]
+\node[stage, fit=(raw)(raws)] {};
+\node[font=\large\bfseries\scshape, text=tealdark, anchor=south west] at ([xshift=-4.8cm,yshift=1.0cm]raw.north) {Data Intake};
+\node[stage, fit=(qc)(qcs)] {};
+\node[font=\large\bfseries\scshape, text=tealdark, anchor=south west] at ([xshift=-4.8cm,yshift=1.0cm]qc.north) {Preprocessing};
+\node[stage, fit=(split)(pca)(pcas)(tcr)(tcrs)] {};
+\node[font=\large\bfseries\scshape, text=tealdark, anchor=south west] at ([xshift=-5.8cm,yshift=1.0cm]split.north) {Feature Engineering};
+\node[stage, fit=(integrated)(ints)] {};
+\node[font=\large\bfseries\scshape, text=tealdark, anchor=south west] at ([xshift=-5.8cm,yshift=1.0cm]integrated.north) {Integration};
+\end{scope}
+\end{tikzpicture}
+\end{document}

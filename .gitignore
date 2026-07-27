@@ -1,0 +1,34 @@
+# Ignore all log files
+*.log
+
+# Ignore the entire data directory
+data/
+
+# Ignore the virtual environment folder
+.venv/
+
+# Ignore the article directory
+Article/
+
+# Ignore the MD directory
+MD/
+
+# Ignore the Archive directory
+Archive/
+
+# Ignore API keys and credentials
+kaggle.json
+
+# Ignore output directory
+/Output
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore the development directory
+Dev/
+
+# Ignore the .env file containing environment variables
+.env
+
+Image/*.md

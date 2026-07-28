@@ -35,8 +35,7 @@ jobs:
 
       - name: Push and run code on Kaggle
         env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
           # The script detects Kaggle and downloads GSE300475 when no input mount exists.
           kaggle kernels push -p .

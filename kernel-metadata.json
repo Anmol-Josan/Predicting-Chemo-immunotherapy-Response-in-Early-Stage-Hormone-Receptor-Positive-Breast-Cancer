@@ -1,6 +1,6 @@
 {
   "id": "anmoljosan/HRCancerNotebook",
-  "title": "HRCancerRevisionPipeline",
+  "title": "HRCancerNotebook",
   "code_file": "run_revision_pipeline.py",
   "language": "python",
   "kernel_type": "script",

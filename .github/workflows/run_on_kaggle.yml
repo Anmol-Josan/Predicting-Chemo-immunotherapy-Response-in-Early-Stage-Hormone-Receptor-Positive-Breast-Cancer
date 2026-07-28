@@ -31,6 +31,7 @@ jobs:
           metadata = json.loads(Path("kernel-metadata.json").read_text())
           assert metadata["code_file"] == "run_revision_pipeline.py"
           assert metadata["kernel_type"] == "script"
+          assert metadata["enable_gpu"] == "false"
           PY
 
       - name: Push and run code on Kaggle

@@ -21,11 +21,14 @@ from __future__ import annotations
 
 import argparse
 import gc
+import gzip
 import hashlib
+import importlib.util
 import json
 import logging
 import os
 import random
+import subprocess
 import sys
 import tarfile
 import time
@@ -33,6 +36,55 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+
+
+RUNTIME_PACKAGES = {
+    "joblib": "joblib>=1.3",
+    "matplotlib": "matplotlib>=3.7",
+    "numpy": "numpy>=1.24",
+    "pandas": "pandas>=2.0",
+    "scipy": "scipy>=1.10",
+    "sklearn": "scikit-learn>=1.3",
+    "xgboost": "xgboost>=2.0",
+    "tensorflow": "tensorflow>=2.15",
+    "shap": "shap>=0.44",
+    "optuna": "optuna>=3.6",
+}
+
+
+def ensure_runtime_packages() -> None:
+    """Install only missing runtime packages before importing the science stack."""
+    missing = [
+        requirement
+        for module, requirement in RUNTIME_PACKAGES.items()
+        if importlib.util.find_spec(module) is None
+    ]
+    if not missing:
+        return
+    print(
+        "Installing missing runtime packages: " + ", ".join(missing),
+        file=sys.stderr,
+        flush=True,
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        "--no-input",
+        *missing,
+    ]
+    try:
+        subprocess.check_call(command)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            "Automatic dependency installation failed. Ensure internet access is "
+            "enabled or install requirements.txt before running the pipeline."
+        ) from exc
+
+
+ensure_runtime_packages()
 
 import joblib
 import matplotlib
@@ -42,6 +94,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import sparse
+from scipy.io import mmread
 from sklearn.decomposition import IncrementalPCA
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics import (
@@ -302,6 +355,49 @@ def locate_file(directory: Path, pattern: str) -> Optional[Path]:
     return matches[0] if matches else None
 
 
+def make_unique_names(values: Sequence[str]) -> np.ndarray:
+    """Match Scanpy's make_unique behavior without importing Scanpy."""
+    counts: Dict[str, int] = {}
+    unique: List[str] = []
+    for value in values:
+        name = str(value)
+        occurrence = counts.get(name, 0)
+        unique.append(name if occurrence == 0 else f"{name}-{occurrence}")
+        counts[name] = occurrence + 1
+    return np.asarray(unique, dtype=object)
+
+
+def tenx_companion(matrix_path: Path, stem: str) -> Optional[Path]:
+    """Locate a barcodes/features file sharing a 10x matrix prefix."""
+    prefix = matrix_path.name.split("matrix.mtx", 1)[0]
+    candidates = sorted(matrix_path.parent.glob(f"{prefix}{stem}.tsv*"))
+    return candidates[0] if candidates else None
+
+
+def read_10x_sparse(matrix_path: Path) -> Tuple[Any, np.ndarray, np.ndarray]:
+    """Read a 10x Matrix Market bundle directly into cells-by-genes CSR."""
+    features_path = tenx_companion(matrix_path, "features") or tenx_companion(matrix_path, "genes")
+    barcodes_path = tenx_companion(matrix_path, "barcodes")
+    if features_path is None or barcodes_path is None:
+        raise FileNotFoundError(f"Incomplete 10x bundle beside {matrix_path}")
+
+    opener = gzip.open if matrix_path.suffix == ".gz" else open
+    with opener(matrix_path, "rb") as handle:
+        matrix = mmread(handle)
+    matrix = sparse.csr_matrix(matrix.T, dtype=np.float32)
+
+    features = pd.read_csv(features_path, sep="\t", header=None, compression="infer")
+    barcodes = pd.read_csv(barcodes_path, sep="\t", header=None, compression="infer")
+    if matrix.shape != (len(barcodes), len(features)):
+        raise ValueError(
+            f"10x dimensions disagree for {matrix_path}: matrix={matrix.shape}, "
+            f"barcodes={len(barcodes)}, features={len(features)}"
+        )
+    gene_column = 1 if features.shape[1] > 1 else 0
+    genes = make_unique_names(features.iloc[:, gene_column].astype(str).tolist())
+    return matrix, genes, barcodes.iloc[:, 0].astype(str).to_numpy()
+
+
 def safe_extract_tar(tar_path: Path, destination: Path) -> None:
     ensure_dir(destination)
     with tarfile.open(tar_path, "r") as archive:
@@ -414,30 +510,17 @@ def read_tcr_for_sample(raw_dir: Path, tcr_id: Optional[str], sample_id: str) ->
 
 
 def load_raw_directory(raw_dir: Path) -> CellData:
-    try:
-        import anndata as ad
-        import scanpy as sc
-    except ImportError as exc:
-        raise RuntimeError("scanpy and anndata are required for raw 10x GEO input") from exc
-    samples: List[Any] = []
+    samples: List[Tuple[Any, np.ndarray, pd.DataFrame]] = []
     for row in SAMPLE_METADATA.itertuples(index=False):
         matrix = locate_file(raw_dir, f"*{row.gex_id}*{row.sample_id}*matrix.mtx*")
         if matrix is None:
             LOGGER.warning("Skipping missing expression matrix for %s", row.sample_id)
             continue
-        sample_dir = matrix.parent
-        prefix = "" if sample_dir != raw_dir else f"{row.gex_id}_{row.sample_id}_"
-        try:
-            sample = sc.read_10x_mtx(sample_dir, var_names="gene_symbols", make_unique=True, prefix=prefix, cache=False)
-        except Exception:
-            sample = sc.read_10x_mtx(sample_dir, var_names="gene_ids", make_unique=True, prefix=prefix, cache=False)
-        sample.X = sample.X.tocsr().astype(np.float32)
-        obs = pd.DataFrame(index=sample.obs_names.astype(str))
-        obs["barcode"] = sample.obs_names.astype(str)
+        X, genes, barcodes = read_10x_sparse(matrix)
+        obs = pd.DataFrame({"barcode": barcodes})
         tcr = read_tcr_for_sample(raw_dir, row.tcr_id, row.sample_id)
         if not tcr.empty:
-            obs = obs.reset_index(drop=True).merge(tcr, on="barcode", how="left")
-            obs.index = sample.obs_names
+            obs = obs.merge(tcr, on="barcode", how="left", sort=False)
         else:
             obs["cdr3_TRA"] = ""
             obs["cdr3_TRB"] = ""
@@ -446,16 +529,39 @@ def load_raw_directory(raw_dir: Path) -> CellData:
         obs["timepoint"] = row.timepoint
         obs["response"] = row.response
         obs["y"] = row.y
-        sample.obs = obs
-        samples.append(sample)
+        samples.append((X, genes, obs))
+        LOGGER.info("Loaded %s: cells=%d genes=%d", row.sample_id, X.shape[0], X.shape[1])
     if not samples:
         raise FileNotFoundError(f"No 10x expression matrices found under {raw_dir}")
-    merged = ad.concat(samples, join="outer", merge="same", index_unique=None)
-    X = merged.X.tocsr().astype(np.float32)
-    obs = normalize_metadata(merged.obs)
+
+    all_genes = list(dict.fromkeys(gene for _, genes, _ in samples for gene in genes))
+    gene_lookup = {gene: index for index, gene in enumerate(all_genes)}
+    aligned: List[Any] = []
+    observations: List[pd.DataFrame] = []
+    for X_sample, genes, obs_sample in samples:
+        if len(genes) == len(all_genes) and all(gene == all_genes[i] for i, gene in enumerate(genes)):
+            aligned.append(X_sample)
+        else:
+            coo = X_sample.tocoo()
+            remapped_columns = np.fromiter(
+                (gene_lookup[genes[column]] for column in coo.col),
+                dtype=np.int64,
+                count=coo.nnz,
+            )
+            aligned.append(
+                sparse.csr_matrix(
+                    (coo.data, (coo.row, remapped_columns)),
+                    shape=(X_sample.shape[0], len(all_genes)),
+                    dtype=np.float32,
+                )
+            )
+        observations.append(obs_sample)
+
+    X = sparse.vstack(aligned, format="csr", dtype=np.float32)
+    obs = normalize_metadata(pd.concat(observations, ignore_index=True))
     tra = obs.get("cdr3_TRA", pd.Series([""] * len(obs))).fillna("").astype(str).to_numpy()
     trb = obs.get("cdr3_TRB", pd.Series([""] * len(obs))).fillna("").astype(str).to_numpy()
-    return CellData(X=X, gene_names=np.asarray(merged.var_names.astype(str)), metadata=obs, cdr3_tra=tra, cdr3_trb=trb)
+    return CellData(X=X, gene_names=np.asarray(all_genes, dtype=object), metadata=obs, cdr3_tra=tra, cdr3_trb=trb)
 
 
 def make_synthetic_data(seed: int = RANDOM_SEED, cells_per_patient: int = 120, genes: int = 80) -> CellData:
@@ -665,9 +771,7 @@ def fit_xgboost(X_train: np.ndarray, y_train: np.ndarray, params: Mapping[str, A
         import xgboost as xgb
     except ImportError as exc:
         raise RuntimeError("xgboost is required for the XGBoost benchmark") from exc
-    device_params: Dict[str, Any] = {"tree_method": "hist"}
-    if os.environ.get("CUDA_VISIBLE_DEVICES", "") not in ("", "-1"):
-        device_params["device"] = "cuda"
+    device_params: Dict[str, Any] = {"tree_method": "hist", "device": "cpu"}
     model = xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", random_state=seed, n_jobs=max(1, min(4, os.cpu_count() or 1)), **device_params, **dict(params))
     weights = balanced_sample_weights(groups_train) if groups_train is not None else None
     fit_kwargs: Dict[str, Any] = {"sample_weight": weights, "verbose": False}
@@ -677,12 +781,8 @@ def fit_xgboost(X_train: np.ndarray, y_train: np.ndarray, params: Mapping[str, A
         model.fit(X_train, y_train, **fit_kwargs)
     except (TypeError, ValueError) as first_error:
         fit_kwargs.pop("verbose", None)
-        if device_params.get("device") == "cuda":
-            LOGGER.warning("XGBoost GPU fit failed (%s); retrying on CPU", first_error)
-            device_params = {"tree_method": "hist"}
-            model = xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", random_state=seed, n_jobs=max(1, min(4, os.cpu_count() or 1)), **device_params, **dict(params))
         model.fit(X_train, y_train, **fit_kwargs)
-    evals = getattr(model, "evals_result", lambda: {})()
+    evals = model.evals_result() if X_val is not None and y_val is not None else {}
     return model, {"loss": list(evals.get("validation_0", {}).get("logloss", [])), "val_loss": list(evals.get("validation_0", {}).get("logloss", []))}
 
 

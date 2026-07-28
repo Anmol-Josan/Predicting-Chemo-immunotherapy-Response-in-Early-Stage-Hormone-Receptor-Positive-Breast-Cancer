@@ -1,92 +1,13 @@
-# Core Dependencies
-
-# Data Science & Numerical (pinned to compatible versions)
-numpy>=1.21.0,<2.0.0
-pandas>=1.3.0,<3.0.0
-scipy>=1.7.0
-
-# Single-cell RNA-seq Analysis
-scanpy>=1.8.0
-anndata>=0.8.0
-
-# Machine Learning - Core
-scikit-learn>=1.0.0
-joblib>=1.0.0
-
-# Machine Learning - Gradient Boosting (Highly Recommended)
-xgboost>=1.5.0
-
-# Deep Learning (Optional - for neural network models)
-tensorflow>=2.8.0
-
-# Dimensionality Reduction & Visualization
-umap-learn>=0.5.2
-matplotlib>=3.4.0
-seaborn>=0.11.0
-
-# Bioinformatics (for physicochemical property extraction)
-biopython>=1.79
-
-# Model Interpretation (Optional - for SHAP values)
-shap>=0.41.0
-
-# Advanced clustering
-hdbscan>=0.8.27
-
-# Network analysis
-networkx>=2.6
-
-# Interactive visualizations
-plotly>=5.0.0
-
-# Code quality
-black>=21.5b0
-flake8>=3.9.0
-isort>=5.9.0
-
-# Testing
-pytest>=6.2.0
-pytest-cov>=2.12.0
-
-# Note: Install with `pip install -r requirements.txt`
-# For GPU acceleration (TensorFlow): pip install tensorflow[and-cuda]
-
-
-# Single-cell analysis
-scanpy>=1.9.0
-anndata>=0.9.0
-
-# Machine learning
-# Require a newer scikit-learn that provides the private helper `_fit_context` used by
-# some third-party packages; pinning to a recent stable minimum avoids import errors.
-scikit-learn>=1.5.2
-
-# Visualization
-matplotlib>=3.5.0
-seaborn>=0.12.0
-plotly>=5.10.0
-
-# Bioinformatics
-biopython>=1.81
-
-# File processing
-openpyxl>=3.1.0  # For Excel file reading
-# Removed xlrd as it is deprecated for .xlsx files
-
-# System monitoring (optional)
-psutil>=5.9.0    # For memory monitoring
-
-# Dimensionality reduction
-umap-learn>=0.5.0
-
-# Clustering (optional)
-hdbscan>=0.8.0
-
-# Gradient boosting
-xgboost>=1.7.0
-
-# Nested hyperparameter optimization for run_revision_pipeline.py
-optuna>=3.6.0
-
-# Deep learning (optional)
-tensorflow>=2.12.0
+# Runtime dependencies for run_revision_pipeline.py.
+# The script installs missing packages automatically; this file supports
+# reproducible manual/environment setup with: pip install -r requirements.txt
+numpy>=1.24
+pandas>=2.0
+scipy>=1.10
+scikit-learn>=1.3
+joblib>=1.3
+matplotlib>=3.7
+xgboost>=2.0
+tensorflow>=2.15
+shap>=0.44
+optuna>=3.6

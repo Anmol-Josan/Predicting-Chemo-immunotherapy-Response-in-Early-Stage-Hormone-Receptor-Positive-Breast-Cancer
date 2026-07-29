@@ -28,11 +28,13 @@ import json
 import logging
 import os
 import random
+import shutil
 import subprocess
 import sys
 import tarfile
 import time
 import urllib.request
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -166,16 +168,24 @@ class FitRecord:
     model: Any = field(default=None, repr=False)
 
 
+@dataclass
+class ModelTaskResult:
+    model_name: str
+    fold: int
+    held_out_patient: str
+    params: Dict[str, Any]
+    tune_history: Dict[str, List[float]]
+    tune_score: float
+    model_path: str
+    test_indices: np.ndarray = field(repr=False)
+    test_probabilities: np.ndarray = field(repr=False)
+    resumed: bool = False
+
+
 def set_seed(seed: int) -> None:
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
-    try:
-        import tensorflow as tf
-
-        tf.random.set_seed(seed)
-    except Exception:
-        pass
 
 
 def ensure_dir(path: Path) -> Path:
@@ -685,6 +695,11 @@ def keras_available() -> Any:
         from tensorflow import keras
         from tensorflow.keras import layers
 
+        for device in tf.config.list_physical_devices("GPU"):
+            try:
+                tf.config.experimental.set_memory_growth(device, True)
+            except RuntimeError:
+                pass
         return tf, keras, layers
     except ImportError as exc:
         raise RuntimeError("TensorFlow is required for MLP/CNN/BiLSTM/Transformer models; install requirements.txt") from exc
@@ -700,9 +715,15 @@ def build_keras_model(name: str, n_features: int, params: Mapping[str, Any], see
             x = layers.Dense(units, activation="relu", kernel_regularizer=keras.regularizers.l2(params["l2"]))(x)
             x = layers.Dropout(params["dropout"])(x)
     else:
+        sequence_channels = max(1, min(int(params.get("sequence_channels", 1)), n_features))
+        sequence_steps = int(np.ceil(n_features / sequence_channels))
+        padding = sequence_steps * sequence_channels - n_features
         x = layers.Reshape((n_features, 1))(inputs)
+        if padding:
+            x = layers.ZeroPadding1D((0, padding))(x)
+        x = layers.Reshape((sequence_steps, sequence_channels))(x)
         if name == "CNN":
-            x = layers.Conv1D(params["filters"], min(params["kernel_size"], max(1, n_features)), padding="same", activation="relu")(x)
+            x = layers.Conv1D(params["filters"], min(params["kernel_size"], max(1, sequence_steps)), padding="same", activation="relu")(x)
             x = layers.BatchNormalization()(x)
             x = layers.GlobalAveragePooling1D()(x)
         elif name == "BiLSTM":
@@ -840,6 +861,8 @@ def tune_model(name: str, X: np.ndarray, y: np.ndarray, groups: np.ndarray, oute
 
         def objective(trial: Any) -> float:
             params = optuna_parameters(name, trial)
+            if name not in ("MLP", "XGBoost"):
+                params["sequence_channels"] = args.sequence_channels
             score, history = evaluate(params, trial.number)
             trial.set_user_attr("params", params)
             trial.set_user_attr("history", history)
@@ -852,6 +875,9 @@ def tune_model(name: str, X: np.ndarray, y: np.ndarray, groups: np.ndarray, oute
         LOGGER.warning("Optuna unavailable; using deterministic randomized search fallback for %s", name)
 
     candidates = param_candidates(name, args.seed + fold)[: args.n_trials]
+    if name not in ("MLP", "XGBoost"):
+        for params in candidates:
+            params["sequence_channels"] = args.sequence_channels
     best_params, best_score, best_history = candidates[0], -np.inf, {"loss": [], "val_loss": []}
     for trial_id, params in enumerate(candidates):
         score, history = evaluate(params, trial_id)
@@ -1019,12 +1045,253 @@ def cohort_exports(data: CellData, outdir: Path) -> None:
     summary.to_csv(outdir / "cohort_summary.csv", index=False)
 
 
+def available_gpu_count() -> int:
+    """Detect CUDA devices without importing TensorFlow in the parent process."""
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if visible is not None:
+        tokens = [token.strip() for token in visible.split(",") if token.strip() and token.strip() != "-1"]
+        return len(tokens)
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "-L"], check=False, capture_output=True, text=True, timeout=10,
+        )
+        return sum(1 for line in result.stdout.splitlines() if line.lstrip().startswith("GPU "))
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return 0
+
+
+def assign_worker_gpu(gpu_count: int) -> None:
+    """Pin each loky worker to one GPU before TensorFlow is imported."""
+    if gpu_count <= 0:
+        return
+    try:
+        import multiprocessing
+
+        identity = multiprocessing.current_process()._identity
+        worker_number = identity[0] - 1 if identity else 0
+    except Exception:
+        worker_number = 0
+    current = os.environ.get("CUDA_VISIBLE_DEVICES")
+    device_tokens = [token.strip() for token in current.split(",")] if current else [str(i) for i in range(gpu_count)]
+    device_tokens = [token for token in device_tokens if token and token != "-1"]
+    if device_tokens:
+        os.environ["CUDA_VISIBLE_DEVICES"] = device_tokens[worker_number % len(device_tokens)]
+
+
+def restore_resume_zip(zip_path: Path, outdir: Path, data_dir: Path) -> None:
+    """Restore result artifacts and extracted raw inputs from a Kaggle archive."""
+    if not zip_path.exists():
+        raise FileNotFoundError(f"Resume archive not found: {zip_path}")
+    restored_results = 0
+    restored_data = 0
+    with zipfile.ZipFile(zip_path) as archive:
+        for info in archive.infolist():
+            normalized = info.filename.replace("\\", "/")
+            if info.is_dir():
+                continue
+            if normalized.startswith("results/"):
+                relative = Path(normalized[len("results/") :])
+                target = outdir / relative
+                category = "results"
+            elif normalized.startswith("Data/GSE300475_RAW/"):
+                relative = Path(normalized[len("Data/") :])
+                target = data_dir / relative
+                category = "data"
+            else:
+                continue
+            if not relative.parts or ".." in relative.parts:
+                continue
+            if target.exists() and target.stat().st_size == info.file_size:
+                continue
+            ensure_dir(target.parent)
+            with archive.open(info) as source, target.open("wb") as destination:
+                shutil.copyfileobj(source, destination, length=1024 * 1024)
+            if category == "results":
+                restored_results += 1
+            else:
+                restored_data += 1
+    LOGGER.info(
+        "Restored %d result artifacts and %d raw-data files from %s",
+        restored_results, restored_data, zip_path,
+    )
+
+
+def load_fold_features(data: CellData, preprocessor_path: Path, args: argparse.Namespace) -> FoldFeatureSet:
+    saved = joblib.load(preprocessor_path)
+    gene = saved["gene_transformer"]
+    tcr = saved["tcr_transformer"]
+    gene_X = gene.transform(data.X)
+    tcr_X, tcr_names = tcr.transform(data.cdr3_tra, data.cdr3_trb)
+    if args.feature_set == "gene_only":
+        X = gene_X
+        names = gene.feature_names()
+    elif args.feature_set == "tcr_only":
+        X = tcr_X
+        names = tcr_names
+    else:
+        X = np.hstack([gene_X, tcr_X]).astype(np.float32, copy=False)
+        names = list(saved.get("feature_names", gene.feature_names() + tcr_names))
+    loadings = np.asarray(saved.get("pca_loadings_gene_space", gene.gene_space_loadings(len(data.gene_names))))
+    return FoldFeatureSet(X, list(names), gene, tcr, np.asarray(gene.variance_ratio_), loadings)
+
+
+def model_artifact_path(outdir: Path, model_name: str, fold: int) -> Path:
+    suffix = ".joblib" if model_name == "XGBoost" else ".keras"
+    return outdir / "models" / f"{model_name}_fold_{fold}{suffix}"
+
+
+def load_saved_model(model_name: str, path: Path) -> Any:
+    if model_name == "XGBoost":
+        return joblib.load(path)
+    _, keras, _ = keras_available()
+    return keras.models.load_model(path, compile=False)
+
+
+def task_signature(model_name: str, fold: int, X: np.ndarray, args: argparse.Namespace) -> str:
+    settings = {
+        "model": model_name,
+        "fold": fold,
+        "shape": list(X.shape),
+        "seed": args.seed,
+        "feature_set": args.feature_set,
+        "n_trials": args.n_trials,
+        "tune_epochs": args.tune_epochs,
+        "epochs": args.epochs,
+        "sequence_channels": args.sequence_channels,
+        "tune_cells_per_patient": args.tune_cells_per_patient,
+        "max_train_cells_per_patient": args.max_train_cells_per_patient,
+    }
+    return hashlib.sha256(json.dumps(settings, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def load_completed_task(
+    model_name: str,
+    fold: int,
+    held_out: str,
+    X: np.ndarray,
+    test_idx: np.ndarray,
+    outdir: Path,
+    args: argparse.Namespace,
+    allow_checkpoint: bool,
+    allow_legacy_artifact: bool,
+) -> Optional[ModelTaskResult]:
+    artifact = model_artifact_path(outdir, model_name, fold)
+    checkpoint_dir = ensure_dir(outdir / "checkpoints")
+    metadata_path = checkpoint_dir / f"{model_name}_fold_{fold}.json"
+    predictions_path = checkpoint_dir / f"{model_name}_fold_{fold}.npz"
+    signature = task_signature(model_name, fold, X, args)
+    if allow_checkpoint and artifact.exists() and metadata_path.exists() and predictions_path.exists():
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if metadata.get("signature") == signature:
+                with np.load(predictions_path) as saved:
+                    probabilities = np.asarray(saved["test_probabilities"], dtype=np.float32)
+                if len(probabilities) == len(test_idx):
+                    return ModelTaskResult(
+                        model_name, fold, held_out, dict(metadata["params"]),
+                        dict(metadata.get("tune_history", {})), float(metadata.get("tune_score", np.nan)),
+                        str(artifact), test_idx, probabilities, True,
+                    )
+        except Exception as exc:
+            LOGGER.warning("Ignoring unreadable checkpoint for %s fold %d: %s", model_name, fold, exc)
+    if not (allow_legacy_artifact and artifact.exists()):
+        return None
+    LOGGER.info("Recovering predictions from legacy artifact: %s", artifact)
+    try:
+        model = load_saved_model(model_name, artifact)
+        probabilities = predict_model(model_name, model, X[test_idx])
+        if model_name != "XGBoost":
+            try:
+                _, keras, _ = keras_available()
+                keras.backend.clear_session()
+            except Exception:
+                pass
+        del model
+        gc.collect()
+    except Exception as exc:
+        LOGGER.warning("Legacy artifact is incompatible; retraining %s fold %d: %s", model_name, fold, exc)
+        return None
+    return ModelTaskResult(
+        model_name, fold, held_out, {"resumed_from_legacy_artifact": True},
+        {"loss": [], "val_loss": []}, np.nan, str(artifact), test_idx, probabilities, True,
+    )
+
+
+def train_model_task(
+    model_name: str,
+    fold: int,
+    held_out: str,
+    X: np.ndarray,
+    y: np.ndarray,
+    groups: np.ndarray,
+    train_idx: np.ndarray,
+    test_idx: np.ndarray,
+    outdir_text: str,
+    args: argparse.Namespace,
+) -> ModelTaskResult:
+    """Tune and fit one independent model/fold job inside a worker process."""
+    assign_worker_gpu(int(getattr(args, "worker_gpu_count", 0)))
+    outdir = Path(outdir_text)
+    LOGGER.info("Training %s fold %d (held out %s)", model_name, fold, held_out)
+    params, tune_history, tune_score = tune_model(model_name, X, y, groups, train_idx, args, fold)
+    full_relative = sample_group_indices(groups[train_idx], args.max_train_cells_per_patient, args.seed + fold + 100)
+    full_train_idx = train_idx[full_relative]
+    if model_name == "XGBoost":
+        model, _ = fit_xgboost(X[full_train_idx], y[full_train_idx], params, args.seed + fold, groups_train=groups[full_train_idx])
+    else:
+        model, _ = fit_neural(X[full_train_idx], y[full_train_idx], params, model_name, args.seed + fold, args.epochs, groups_train=groups[full_train_idx])
+    probabilities = predict_model(model_name, model, X[test_idx])
+    artifact = model_artifact_path(outdir, model_name, fold)
+    ensure_dir(artifact.parent)
+    temporary_artifact = artifact.with_name(artifact.stem + ".tmp" + artifact.suffix)
+    if model_name == "XGBoost":
+        joblib.dump(model, temporary_artifact)
+    else:
+        model.save(temporary_artifact, include_optimizer=False)
+    os.replace(temporary_artifact, artifact)
+
+    checkpoint_dir = ensure_dir(outdir / "checkpoints")
+    predictions_path = checkpoint_dir / f"{model_name}_fold_{fold}.npz"
+    temporary_predictions = predictions_path.with_suffix(".tmp.npz")
+    with temporary_predictions.open("wb") as handle:
+        np.savez_compressed(handle, test_probabilities=probabilities)
+    os.replace(temporary_predictions, predictions_path)
+    metadata = {
+        "signature": task_signature(model_name, fold, X, args),
+        "model_name": model_name,
+        "fold": fold,
+        "held_out_patient": held_out,
+        "params": params,
+        "tune_history": tune_history,
+        "tune_score": tune_score,
+    }
+    metadata_path = checkpoint_dir / f"{model_name}_fold_{fold}.json"
+    temporary_metadata = metadata_path.with_suffix(".tmp.json")
+    temporary_metadata.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
+    os.replace(temporary_metadata, metadata_path)
+    if model_name != "XGBoost":
+        try:
+            _, keras, _ = keras_available()
+            keras.backend.clear_session()
+        except Exception:
+            pass
+    del model
+    gc.collect()
+    return ModelTaskResult(
+        model_name, fold, held_out, params, tune_history, tune_score,
+        str(artifact), test_idx, probabilities, False,
+    )
+
+
 def run_pipeline(args: argparse.Namespace) -> Path:
     set_seed(args.seed)
     project_root = Path(__file__).resolve().parent
     outdir = ensure_dir(Path(args.output_dir).expanduser())
     ensure_dir(outdir / "models")
     ensure_dir(outdir / "preprocessors")
+    ensure_dir(outdir / "checkpoints")
+    if args.resume_zip:
+        restore_resume_zip(Path(args.resume_zip).expanduser(), outdir, Path(args.data_dir).expanduser())
     data = filter_timepoints(load_data(args, project_root), args.timepoint_mode)
     data.metadata["cdr3_tra"] = data.cdr3_tra
     data.metadata["cdr3_trb"] = data.cdr3_trb
@@ -1042,8 +1309,18 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     if any(m not in MODEL_NAMES for m in models):
         raise ValueError(f"Unknown model; choose from {MODEL_NAMES}")
-    if any(m != "XGBoost" for m in models):
+    gpu_count = available_gpu_count()
+    args.worker_gpu_count = gpu_count
+    if args.parallel_jobs > 0:
+        parallel_jobs = args.parallel_jobs
+    elif gpu_count > 0:
+        parallel_jobs = gpu_count
+    else:
+        parallel_jobs = min(4, max(1, os.cpu_count() or 1))
+    if parallel_jobs == 1 and any(m != "XGBoost" for m in models):
+        assign_worker_gpu(gpu_count)
         keras_available()
+    LOGGER.info("Model/fold parallel jobs=%d detected_gpus=%d", parallel_jobs, gpu_count)
 
     pca_records: List[Tuple[int, np.ndarray]] = []
     variance_rows: List[Dict[str, Any]] = []
@@ -1057,48 +1334,109 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     else:
         shap_target = args.shap_model
 
+    fold_contexts: List[Tuple[int, np.ndarray, np.ndarray, str, FoldFeatureSet, Path, bool]] = []
+    allow_resume = bool(args.resume or args.resume_zip)
     for fold, (train_idx, test_idx, held_out) in enumerate(outer_splits, start=1):
         LOGGER.info("Outer fold %d/%d: held-out patient=%s", fold, len(outer_splits), held_out)
-        tuning_train = sample_group_indices(groups[train_idx], args.max_train_cells_per_patient, args.seed + fold)
-        tuning_train = train_idx[tuning_train]
-        feature_set = build_fold_features(data, tuning_train, args)
+        preprocessor_path = outdir / "preprocessors" / f"fold_{fold}.joblib"
+        reused_preprocessor = False
+        if allow_resume and preprocessor_path.exists():
+            LOGGER.info("Reusing fitted preprocessor for fold %d", fold)
+            try:
+                feature_set = load_fold_features(data, preprocessor_path, args)
+                reused_preprocessor = True
+            except Exception as exc:
+                LOGGER.warning("Could not reuse fold %d preprocessor (%s); refitting", fold, exc)
+        if not reused_preprocessor:
+            tuning_train = sample_group_indices(groups[train_idx], args.max_train_cells_per_patient, args.seed + fold)
+            tuning_train = train_idx[tuning_train]
+            feature_set = build_fold_features(data, tuning_train, args)
+            joblib.dump(
+                {
+                    "gene_transformer": feature_set.gene_transformer,
+                    "tcr_transformer": feature_set.tcr_transformer,
+                    "feature_names": feature_set.feature_names,
+                    "pca_loadings_gene_space": feature_set.pca_loadings_gene_space,
+                },
+                preprocessor_path,
+            )
         pca_records.append((fold, feature_set.pca_variance_ratio))
         for pc, variance in enumerate(feature_set.pca_variance_ratio, start=1):
             variance_rows.append({"fold": fold, "pc": pc, "explained_variance_ratio": float(variance), "cumulative_explained_variance": float(np.sum(feature_set.pca_variance_ratio[:pc]))})
-        preprocessor_path = outdir / "preprocessors" / f"fold_{fold}.joblib"
-        joblib.dump({"gene_transformer": feature_set.gene_transformer, "tcr_transformer": feature_set.tcr_transformer, "feature_names": feature_set.feature_names, "pca_loadings_gene_space": feature_set.pca_loadings_gene_space}, preprocessor_path)
-        X = feature_set.X
+        fold_contexts.append((fold, train_idx, test_idx, held_out, feature_set, preprocessor_path, reused_preprocessor))
+
+    completed_results: List[ModelTaskResult] = []
+    pending_tasks: List[Tuple[str, int, str, np.ndarray, np.ndarray, np.ndarray]] = []
+    for fold, train_idx, test_idx, held_out, feature_set, _, reused_preprocessor in fold_contexts:
         for model_name in models:
-            params, tune_history, tune_score = tune_model(model_name, X, y, groups, train_idx, args, fold)
-            best_hyperparameters.setdefault(model_name, []).append({"fold": fold, "held_out_patient": held_out, "params": params, "inner_score": tune_score})
-            loss_histories[model_name].append(tune_history)
-            full_train_idx = sample_group_indices(groups[train_idx], args.max_train_cells_per_patient, args.seed + fold + 100)
-            full_train_idx = train_idx[full_train_idx]
-            if model_name == "XGBoost":
-                model, _ = fit_xgboost(X[full_train_idx], y[full_train_idx], params, args.seed + fold, groups_train=groups[full_train_idx])
+            completed = load_completed_task(
+                model_name, fold, held_out, feature_set.X, test_idx, outdir, args,
+                allow_checkpoint=allow_resume and reused_preprocessor,
+                allow_legacy_artifact=allow_resume and reused_preprocessor,
+            )
+            if completed is not None:
+                completed_results.append(completed)
             else:
-                model, _ = fit_neural(X[full_train_idx], y[full_train_idx], params, model_name, args.seed + fold, args.epochs, groups_train=groups[full_train_idx])
-            test_prob = predict_model(model_name, model, X[test_idx])
-            fold_cell = compute_metrics(y[test_idx], test_prob)
-            for metric, value in fold_cell.items():
-                all_fold_metrics.append({"model": model_name, "fold": fold, "held_out_patient": held_out, "aggregation": "cell_fold", "metric": metric, "value": value})
-            patient_frame = pd.DataFrame({"patient_id": groups[test_idx], "sample_id": data.metadata.iloc[test_idx]["sample_id"].to_numpy(), "y": y[test_idx], "probability": test_prob, "model": model_name, "fold": fold})
-            patient_fold = aggregate_predictions(patient_frame, "patient")
-            for metric, value in compute_metrics(patient_fold["y"].to_numpy(), patient_fold["probability"].to_numpy()).items():
-                all_fold_metrics.append({"model": model_name, "fold": fold, "held_out_patient": held_out, "aggregation": "patient_fold", "metric": metric, "value": value, "n_units": int(len(patient_fold))})
-            prediction_frames[model_name].append(patient_frame)
-            artifact_path = outdir / "models" / f"{model_name}_fold_{fold}"
-            if model_name == "XGBoost":
-                joblib.dump(model, str(artifact_path) + ".joblib")
-                model_path = str(artifact_path) + ".joblib"
-            else:
-                model_path = str(artifact_path) + ".keras"
-                model.save(model_path, include_optimizer=True)
-            record = FitRecord(model_name, fold, str(held_out), params, model_path, str(preprocessor_path), feature_set.feature_names, test_idx, X[test_idx], model)
-            if model_name == shap_target:
-                shap_records[model_name].append(record)
-            del model
-            gc.collect()
+                pending_tasks.append((model_name, fold, held_out, feature_set.X, train_idx, test_idx))
+
+    if pending_tasks:
+        # Longest-processing-time ordering keeps slow recurrent/attention jobs
+        # from becoming a serial tail after the shorter MLP/XGBoost jobs finish.
+        priority = {"BiLSTM": 0, "Transformer": 1, "CNN": 2, "MLP": 3, "XGBoost": 4}
+        pending_tasks.sort(key=lambda task: (priority[task[0]], task[1]))
+        LOGGER.info(
+            "Training %d pending model/fold jobs (%d recovered from checkpoints/artifacts)",
+            len(pending_tasks), len(completed_results),
+        )
+        if parallel_jobs == 1:
+            trained_results = [
+                train_model_task(model_name, fold, held_out, X, y, groups, train_idx, test_idx, str(outdir), args)
+                for model_name, fold, held_out, X, train_idx, test_idx in pending_tasks
+            ]
+        else:
+            # Loky processes isolate TensorFlow state. Limiting each process to
+            # one native thread prevents BLAS/TensorFlow oversubscription.
+            with joblib.parallel_config(backend="loky", inner_max_num_threads=1):
+                trained_results = joblib.Parallel(
+                    n_jobs=min(parallel_jobs, len(pending_tasks)),
+                    max_nbytes="10M",
+                    mmap_mode="r",
+                    verbose=10 if args.log_level == "DEBUG" else 0,
+                )(
+                    joblib.delayed(train_model_task)(
+                        model_name, fold, held_out, X, y, groups, train_idx, test_idx, str(outdir), args
+                    )
+                    for model_name, fold, held_out, X, train_idx, test_idx in pending_tasks
+                )
+        completed_results.extend(trained_results)
+    else:
+        LOGGER.info("All model/fold jobs recovered; no retraining required")
+
+    context_by_fold = {fold: (test_idx, feature_set, preprocessor_path) for fold, _, test_idx, _, feature_set, preprocessor_path, _ in fold_contexts}
+    for result in sorted(completed_results, key=lambda item: (item.fold, models.index(item.model_name))):
+        model_name = result.model_name
+        fold = result.fold
+        held_out = result.held_out_patient
+        test_idx, feature_set, preprocessor_path = context_by_fold[fold]
+        test_prob = result.test_probabilities
+        best_hyperparameters.setdefault(model_name, []).append({"fold": fold, "held_out_patient": held_out, "params": result.params, "inner_score": result.tune_score, "resumed": result.resumed})
+        loss_histories[model_name].append(result.tune_history)
+        fold_cell = compute_metrics(y[test_idx], test_prob)
+        for metric, value in fold_cell.items():
+            all_fold_metrics.append({"model": model_name, "fold": fold, "held_out_patient": held_out, "aggregation": "cell_fold", "metric": metric, "value": value})
+        patient_frame = pd.DataFrame({"patient_id": groups[test_idx], "sample_id": data.metadata.iloc[test_idx]["sample_id"].to_numpy(), "y": y[test_idx], "probability": test_prob, "model": model_name, "fold": fold})
+        patient_fold = aggregate_predictions(patient_frame, "patient")
+        for metric, value in compute_metrics(patient_fold["y"].to_numpy(), patient_fold["probability"].to_numpy()).items():
+            all_fold_metrics.append({"model": model_name, "fold": fold, "held_out_patient": held_out, "aggregation": "patient_fold", "metric": metric, "value": value, "n_units": int(len(patient_fold))})
+        prediction_frames[model_name].append(patient_frame)
+        record = FitRecord(model_name, fold, str(held_out), result.params, result.model_path, str(preprocessor_path), feature_set.feature_names, test_idx, feature_set.X[test_idx], None)
+        if model_name == shap_target:
+            shap_records[model_name].append(record)
+
+    # Load only the selected attribution models after parallel training. Keeping
+    # models out of worker return values avoids expensive Keras serialization.
+    for record in shap_records.get(shap_target, []):
+        record.model = load_saved_model(record.model_name, Path(record.model_path))
 
     pd.DataFrame(variance_rows).to_csv(outdir / "pca_variance_by_fold.csv", index=False)
     plot_pca_variance(pca_records, outdir)
@@ -1130,7 +1468,24 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     export_loss_curves(loss_histories, outdir)
 
     compute_shap_summary(shap_target, shap_records[shap_target], data, outdir, args)
-    run_metadata = {"seed": args.seed, "timepoint_mode": args.timepoint_mode, "feature_set": args.feature_set, "models": models, "n_cells": int(data.X.shape[0]), "n_genes": int(data.X.shape[1]), "n_patients": int(len(patients)), "pca_top_50_cumulative_by_fold": {str(fold): float(np.sum(var)) for fold, var in pca_records}, "software": software_versions()}
+    run_metadata = {
+        "seed": args.seed,
+        "timepoint_mode": args.timepoint_mode,
+        "feature_set": args.feature_set,
+        "models": models,
+        "n_cells": int(data.X.shape[0]),
+        "n_genes": int(data.X.shape[1]),
+        "n_patients": int(len(patients)),
+        "parallel_jobs": parallel_jobs,
+        "detected_gpus": gpu_count,
+        "fast_mode": bool(args.fast),
+        "n_trials": args.n_trials,
+        "tune_epochs": args.tune_epochs,
+        "epochs": args.epochs,
+        "sequence_channels": args.sequence_channels,
+        "pca_top_50_cumulative_by_fold": {str(fold): float(np.sum(var)) for fold, var in pca_records},
+        "software": software_versions(),
+    }
     (outdir / "run_metadata.json").write_text(json.dumps(run_metadata, indent=2, default=str), encoding="utf-8")
     LOGGER.info("Pipeline completed. Outputs: %s", outdir.resolve())
     return outdir
@@ -1153,6 +1508,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--data-dir", default="/kaggle/working/Data", help="Download/cache directory for GEO raw files")
     parser.add_argument("--download", action="store_true", help="Download GSE300475 when no local input is found")
     parser.add_argument("--output-dir", default="results", help="Artifact directory")
+    parser.add_argument("--resume", action="store_true", help="Reuse compatible checkpoints and legacy model artifacts already in output-dir")
+    parser.add_argument("--resume-zip", default=None, help="Previous Kaggle results.zip; restores results and extracted raw data before resuming")
+    parser.add_argument("--parallel-jobs", type=int, default=0, help="Independent model/fold processes; 0 auto-detects up to 4")
+    parser.add_argument("--fast", action="store_true", help="Use a substantially smaller, publication-draft search budget for Kaggle")
     parser.add_argument("--timepoint-mode", choices=("baseline", "all", "exclude_recurrence"), default="baseline")
     parser.add_argument("--feature-set", choices=("combined", "gene_only", "tcr_only"), default="combined")
     parser.add_argument("--models", default=",".join(MODEL_NAMES), help="Comma-separated model names")
@@ -1165,6 +1524,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--n-trials", type=int, default=4, help="Randomized trials per architecture; every architecture is tuned")
     parser.add_argument("--tune-epochs", type=int, default=12)
     parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--sequence-channels", type=int, default=1, help="Pack adjacent scalar features into channels for CNN/BiLSTM/Transformer; values >1 reduce sequence cost")
     parser.add_argument("--bootstrap-replicates", type=int, default=2000)
     parser.add_argument("--shap-model", choices=("auto", "all", *MODEL_NAMES), default="auto")
     parser.add_argument("--shap-cells", type=int, default=500)
@@ -1178,10 +1538,28 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
+    on_kaggle = bool(os.environ.get("KAGGLE_KERNEL_RUN_TYPE") or Path("/kaggle").exists())
+    if not args.resume_zip and on_kaggle:
+        packaged_archive = Path.cwd() / "results.zip"
+        if packaged_archive.exists():
+            args.resume_zip = str(packaged_archive)
+        else:
+            resume_candidates = sorted(Path("/kaggle/input").rglob("results.zip"))
+            if len(resume_candidates) == 1:
+                args.resume_zip = str(resume_candidates[0])
+    if args.fast:
+        args.max_train_cells_per_patient = min(args.max_train_cells_per_patient, 6000) if args.max_train_cells_per_patient > 0 else 6000
+        args.tune_cells_per_patient = min(args.tune_cells_per_patient, 1000) if args.tune_cells_per_patient > 0 else 1000
+        args.n_trials = min(args.n_trials, 2)
+        args.tune_epochs = min(args.tune_epochs, 6)
+        args.epochs = min(args.epochs, 18)
+        args.sequence_channels = max(args.sequence_channels, 16)
+        args.bootstrap_replicates = min(args.bootstrap_replicates, 1000)
+        args.shap_cells = min(args.shap_cells, 250)
     # Kaggle script kernels do not provide a convenient command-line argument
     # field in kernel-metadata.json. Auto-enable the public GEO download only
     # in the Kaggle runtime; local runs remain explicit and reproducible.
-    if not args.input_data and not args.synthetic and (os.environ.get("KAGGLE_KERNEL_RUN_TYPE") or Path("/kaggle").exists()):
+    if not args.input_data and not args.synthetic and on_kaggle:
         args.download = True
     logging.basicConfig(level=getattr(logging, args.log_level), format="%(asctime)s | %(levelname)s | %(message)s")
     started = time.time()

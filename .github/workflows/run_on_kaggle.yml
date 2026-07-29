@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout repository code
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -24,6 +26,9 @@ jobs:
       - name: Validate Kaggle entrypoint
         run: |
           test -f run_revision_pipeline.py
+          test -f results.zip
+          # Catch an unhydrated Git-LFS pointer before invoking the Kaggle API.
+          test "$(stat -c%s results.zip)" -gt 1000000
           python -m py_compile run_revision_pipeline.py
           python - <<'PY'
           import json
@@ -38,5 +43,5 @@ jobs:
         env:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
-          # The script detects Kaggle and downloads GSE300475 when no input mount exists.
+          # results.zip is included in the kernel package and auto-detected by the script.
           kaggle kernels push -p .

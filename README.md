@@ -28,6 +28,29 @@ This repository applies unsupervised machine learning to single-cell RNA sequenc
    Use `--timepoint-mode all` for the longitudinal sensitivity analysis. The script fits HVG selection, scaling, PCA, and TCR vocabularies inside every LOPO training fold; UMAP is not used as a predictive feature.
 4. The legacy notebooks remain available for historical figure reproduction: `Code/Main.ipynb` and `Code/hr-cancer.ipynb`.
 
+**Kaggle performance and resume**
+
+The pipeline trains independent model/fold jobs in parallel. In CPU runtimes it
+uses up to four single-threaded worker processes; in GPU runtimes it uses one
+worker per detected GPU. Each completed job writes an atomic checkpoint, so a
+Kaggle timeout can be resumed without repeating finished work.
+
+The GitHub workflow packages `results.zip` with the kernel. A script kernel
+automatically resumes from that packaged file. If running manually, upload
+`results.zip` as a private Kaggle dataset and attach it to the kernel; the
+script also detects exactly one attached file named `results.zip`. For an
+explicit path, run:
+
+    python run_revision_pipeline.py --download --timepoint-mode baseline \
+      --resume-zip /kaggle/input/YOUR-DATASET/results.zip
+
+For a much faster fresh draft run, add `--fast` (do not add it when continuing
+the supplied full-budget archive). This reduces tuning cells, trials, epochs,
+SHAP cells, and bootstrap replicates and packs scalar inputs into shorter
+sequences for the recurrent/attention models. Use the full defaults for final
+reported results. `--parallel-jobs N` overrides automatic CPU/GPU worker
+selection. The supplied `kernel-metadata.json` disables Kaggle GPU usage.
+
 **Data**
 - Processed data and derived tables are available in `Processed_Data/` and `Output/Processed_Data/`.
 - Large raw data files are not included in the repository; follow dataset acquisition instructions inside the notebooks.

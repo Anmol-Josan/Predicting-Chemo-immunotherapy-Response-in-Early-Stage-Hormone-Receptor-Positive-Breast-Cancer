@@ -787,13 +787,36 @@ def optuna_parameters(name: str, trial: Any) -> Dict[str, Any]:
     return {"n_estimators": trial.suggest_int("n_estimators", 80, 180, step=20), "max_depth": trial.suggest_int("max_depth", 2, 5), "learning_rate": learning_rate, "subsample": trial.suggest_float("subsample", 0.7, 1.0), "colsample_bytree": trial.suggest_float("colsample_bytree", 0.7, 1.0), "reg_lambda": trial.suggest_float("reg_lambda", 1.0, 10.0, log=True)}
 
 
+def apply_completion_constraints(name: str, params: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
+    """Bound architecture cost for CPU-only Kaggle completion runs."""
+    params = dict(params)
+    if not getattr(args, "completion_mode", False):
+        return params
+    if name != "XGBoost":
+        params["batch_size"] = max(512, int(params.get("batch_size", 512)))
+        params["early_stopping_patience"] = 1
+    if name == "MLP":
+        params["hidden_units"] = tuple(min(64, int(units)) for units in params["hidden_units"])
+    elif name == "CNN":
+        params["filters"] = min(32, int(params["filters"]))
+    elif name == "BiLSTM":
+        params["lstm_units"] = min(16, int(params["lstm_units"]))
+    elif name == "Transformer":
+        params["d_model"] = min(32, int(params["d_model"]))
+        params["num_heads"] = min(2, int(params["num_heads"]))
+    elif name == "XGBoost":
+        params["n_estimators"] = min(80, int(params["n_estimators"]))
+        params["max_depth"] = min(3, int(params["max_depth"]))
+    return params
+
+
 def fit_xgboost(X_train: np.ndarray, y_train: np.ndarray, params: Mapping[str, Any], seed: int, X_val: Optional[np.ndarray] = None, y_val: Optional[np.ndarray] = None, groups_train: Optional[np.ndarray] = None) -> Tuple[Any, Dict[str, List[float]]]:
     try:
         import xgboost as xgb
     except ImportError as exc:
         raise RuntimeError("xgboost is required for the XGBoost benchmark") from exc
     device_params: Dict[str, Any] = {"tree_method": "hist", "device": "cpu"}
-    model = xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", random_state=seed, n_jobs=max(1, min(4, os.cpu_count() or 1)), **device_params, **dict(params))
+    model = xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", random_state=seed, n_jobs=1, **device_params, **dict(params))
     weights = balanced_sample_weights(groups_train) if groups_train is not None else None
     fit_kwargs: Dict[str, Any] = {"sample_weight": weights, "verbose": False}
     if X_val is not None and y_val is not None:
@@ -817,7 +840,7 @@ def fit_neural(X_train: np.ndarray, y_train: np.ndarray, params: Mapping[str, An
     _, keras, _ = keras_available()
     model = build_keras_model(name, X_train.shape[1], params, seed)
     weights = balanced_sample_weights(groups_train) if groups_train is not None else None
-    callbacks = [keras.callbacks.EarlyStopping(monitor="val_loss" if X_val is not None else "loss", patience=3, restore_best_weights=True, min_delta=1e-4)]
+    callbacks = [keras.callbacks.EarlyStopping(monitor="val_loss" if X_val is not None else "loss", patience=int(params.get("early_stopping_patience", 3)), restore_best_weights=True, min_delta=1e-4)]
     history = model.fit(X_train, y_train, sample_weight=weights, validation_data=(X_val, y_val) if X_val is not None else None, epochs=epochs, batch_size=int(params["batch_size"]), verbose=0, callbacks=callbacks)
     values = {key: [float(x) for x in val] for key, val in history.history.items()}
     return model, {"loss": values.get("loss", []), "val_loss": values.get("val_loss", [])}
@@ -860,7 +883,7 @@ def tune_model(name: str, X: np.ndarray, y: np.ndarray, groups: np.ndarray, oute
         study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=args.seed + fold))
 
         def objective(trial: Any) -> float:
-            params = optuna_parameters(name, trial)
+            params = apply_completion_constraints(name, optuna_parameters(name, trial), args)
             if name not in ("MLP", "XGBoost"):
                 params["sequence_channels"] = args.sequence_channels
             score, history = evaluate(params, trial.number)
@@ -875,8 +898,9 @@ def tune_model(name: str, X: np.ndarray, y: np.ndarray, groups: np.ndarray, oute
         LOGGER.warning("Optuna unavailable; using deterministic randomized search fallback for %s", name)
 
     candidates = param_candidates(name, args.seed + fold)[: args.n_trials]
-    if name not in ("MLP", "XGBoost"):
-        for params in candidates:
+    candidates = [apply_completion_constraints(name, params, args) for params in candidates]
+    for params in candidates:
+        if name not in ("MLP", "XGBoost"):
             params["sequence_channels"] = args.sequence_channels
     best_params, best_score, best_history = candidates[0], -np.inf, {"loss": [], "val_loss": []}
     for trial_id, params in enumerate(candidates):
@@ -1158,6 +1182,7 @@ def task_signature(model_name: str, fold: int, X: np.ndarray, args: argparse.Nam
         "tune_epochs": args.tune_epochs,
         "epochs": args.epochs,
         "sequence_channels": args.sequence_channels,
+        "completion_mode": bool(getattr(args, "completion_mode", False)),
         "tune_cells_per_patient": args.tune_cells_per_patient,
         "max_train_cells_per_patient": args.max_train_cells_per_patient,
     }
@@ -1321,6 +1346,17 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         assign_worker_gpu(gpu_count)
         keras_available()
     LOGGER.info("Model/fold parallel jobs=%d detected_gpus=%d", parallel_jobs, gpu_count)
+    LOGGER.info(
+        "Training budget: completion_mode=%s trials=%d tune_epochs=%d epochs=%d "
+        "tune_cells_per_patient=%d train_cells_per_patient=%d sequence_channels=%d",
+        bool(getattr(args, "completion_mode", False)),
+        args.n_trials,
+        args.tune_epochs,
+        args.epochs,
+        args.tune_cells_per_patient,
+        args.max_train_cells_per_patient,
+        args.sequence_channels,
+    )
 
     pca_records: List[Tuple[int, np.ndarray]] = []
     variance_rows: List[Dict[str, Any]] = []
@@ -1479,6 +1515,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         "parallel_jobs": parallel_jobs,
         "detected_gpus": gpu_count,
         "fast_mode": bool(args.fast),
+        "completion_mode": bool(getattr(args, "completion_mode", False)),
         "n_trials": args.n_trials,
         "tune_epochs": args.tune_epochs,
         "epochs": args.epochs,
@@ -1512,6 +1549,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--resume-zip", default=None, help="Previous Kaggle results.zip; restores results and extracted raw data before resuming")
     parser.add_argument("--parallel-jobs", type=int, default=0, help="Independent model/fold processes; 0 auto-detects up to 4")
     parser.add_argument("--fast", action="store_true", help="Use a substantially smaller, publication-draft search budget for Kaggle")
+    parser.add_argument("--full-budget", action="store_true", help="Disable the automatic bounded CPU completion budget on Kaggle")
     parser.add_argument("--timepoint-mode", choices=("baseline", "all", "exclude_recurrence"), default="baseline")
     parser.add_argument("--feature-set", choices=("combined", "gene_only", "tcr_only"), default="combined")
     parser.add_argument("--models", default=",".join(MODEL_NAMES), help="Comma-separated model names")
@@ -1547,7 +1585,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             resume_candidates = sorted(Path("/kaggle/input").rglob("results.zip"))
             if len(resume_candidates) == 1:
                 args.resume_zip = str(resume_candidates[0])
-    if args.fast:
+    packaged_models = Path(args.output_dir).expanduser() / "models"
+    if on_kaggle and packaged_models.exists() and any(packaged_models.iterdir()):
+        args.resume = True
+    args.completion_mode = bool(on_kaggle and not args.full_budget)
+    if args.completion_mode:
+        args.max_train_cells_per_patient = 2500
+        args.tune_cells_per_patient = 400
+        args.n_trials = 1
+        args.tune_epochs = 3
+        args.epochs = 8
+        args.sequence_channels = 16
+        args.bootstrap_replicates = min(args.bootstrap_replicates, 500)
+        args.shap_cells = min(args.shap_cells, 150)
+    elif args.fast:
         args.max_train_cells_per_patient = min(args.max_train_cells_per_patient, 6000) if args.max_train_cells_per_patient > 0 else 6000
         args.tune_cells_per_patient = min(args.tune_cells_per_patient, 1000) if args.tune_cells_per_patient > 0 else 1000
         args.n_trials = min(args.n_trials, 2)

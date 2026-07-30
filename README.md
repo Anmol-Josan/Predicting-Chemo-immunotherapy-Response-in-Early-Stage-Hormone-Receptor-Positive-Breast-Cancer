@@ -35,8 +35,15 @@ uses up to four single-threaded worker processes; in GPU runtimes it uses one
 worker per detected GPU. Each completed job writes an atomic checkpoint, so a
 Kaggle timeout can be resumed without repeating finished work.
 
-The GitHub workflow packages `results.zip` with the kernel. A script kernel
-automatically resumes from that packaged file. If running manually, upload
+Because this kernel is configured without a GPU, Kaggle automatically uses a
+bounded completion budget: one tuning trial, 3 tuning epochs, 8 final epochs,
+400 tuning cells and 2,500 final-fit cells per patient, and shorter packed
+sequences for CNN/BiLSTM/Transformer. Use `--full-budget` only when running on a
+machine with enough time for the original search.
+
+The GitHub workflow extracts the completed artifacts and rebuilds a compact
+`results.zip` before pushing the kernel. A script kernel automatically resumes
+from both the extracted artifacts and that packaged file. If running manually, upload
 `results.zip` as a private Kaggle dataset and attach it to the kernel; the
 script also detects exactly one attached file named `results.zip`. For an
 explicit path, run:

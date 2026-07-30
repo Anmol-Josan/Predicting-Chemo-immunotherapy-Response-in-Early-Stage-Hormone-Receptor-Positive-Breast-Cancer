@@ -23,10 +23,22 @@ jobs:
       - name: Install Kaggle API
         run: python -m pip install --upgrade "kaggle>=1.8.3"
 
+      - name: Prepare compact Kaggle resume payload
+        run: |
+          test -f results.zip
+          # The original archive also contains ~1.2 GB of downloaded GEO data.
+          # Kaggle can fetch that data in seconds; only the completed model and
+          # preprocessor artifacts are needed to resume training.
+          unzip -oq results.zip 'results/*' -d .
+          mv results.zip /tmp/results-full.zip
+          zip -qr results.zip results
+
       - name: Validate Kaggle entrypoint
         run: |
           test -f run_revision_pipeline.py
           test -f results.zip
+          test -d results/models
+          test "$(find results/models -type f | wc -l)" -ge 12
           # Catch an unhydrated Git-LFS pointer before invoking the Kaggle API.
           test "$(stat -c%s results.zip)" -gt 1000000
           python -m py_compile run_revision_pipeline.py

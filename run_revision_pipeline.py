@@ -20,10 +20,13 @@ Longitudinal sensitivity analysis:
 from __future__ import annotations
 
 import argparse
+import copy
 import gc
 import gzip
 import hashlib
+import importlib.metadata
 import importlib.util
+import itertools
 import json
 import logging
 import os
@@ -49,8 +52,6 @@ RUNTIME_PACKAGES = {
     "sklearn": "scikit-learn>=1.3",
     "xgboost": "xgboost>=2.0",
     "tensorflow": "tensorflow>=2.15",
-    "shap": "shap>=0.44",
-    "optuna": "optuna>=3.6",
 }
 
 
@@ -95,7 +96,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy import sparse
+from scipy import sparse, stats
 from scipy.io import mmread
 from sklearn.decomposition import IncrementalPCA
 from sklearn.feature_extraction.text import CountVectorizer
@@ -106,6 +107,7 @@ from sklearn.metrics import (
     log_loss,
     precision_score,
     recall_score,
+    confusion_matrix,
     roc_auc_score,
 )
 from sklearn.model_selection import GroupKFold, LeaveOneGroupOut
@@ -794,7 +796,7 @@ def apply_completion_constraints(name: str, params: Dict[str, Any], args: argpar
         return params
     if name != "XGBoost":
         params["batch_size"] = max(512, int(params.get("batch_size", 512)))
-        params["early_stopping_patience"] = 1
+        params["early_stopping_patience"] = 4
     if name == "MLP":
         params["hidden_units"] = tuple(min(64, int(units)) for units in params["hidden_units"])
     elif name == "CNN":
@@ -823,7 +825,7 @@ def fit_xgboost(X_train: np.ndarray, y_train: np.ndarray, params: Mapping[str, A
         fit_kwargs["eval_set"] = [(X_val, y_val)]
     try:
         model.fit(X_train, y_train, **fit_kwargs)
-    except (TypeError, ValueError) as first_error:
+    except (TypeError, ValueError):
         fit_kwargs.pop("verbose", None)
         model.fit(X_train, y_train, **fit_kwargs)
     evals = model.evals_result() if X_val is not None and y_val is not None else {}
@@ -833,7 +835,10 @@ def fit_xgboost(X_train: np.ndarray, y_train: np.ndarray, params: Mapping[str, A
 def predict_model(model_name: str, model: Any, X: np.ndarray) -> np.ndarray:
     if model_name == "XGBoost":
         return np.asarray(model.predict_proba(X)[:, 1], dtype=np.float32)
-    return np.asarray(model.predict(X, verbose=0)).reshape(-1).astype(np.float32)
+    predictions = []
+    for start, end in chunk_ranges(len(X), 1024):
+        predictions.append(np.asarray(model(np.asarray(X[start:end], dtype=np.float32), training=False)).reshape(-1))
+    return np.concatenate(predictions).astype(np.float32, copy=False) if predictions else np.asarray([], dtype=np.float32)
 
 
 def fit_neural(X_train: np.ndarray, y_train: np.ndarray, params: Mapping[str, Any], name: str, seed: int, epochs: int, X_val: Optional[np.ndarray] = None, y_val: Optional[np.ndarray] = None, groups_train: Optional[np.ndarray] = None) -> Tuple[Any, Dict[str, List[float]]]:
@@ -992,81 +997,445 @@ def export_loss_curves(loss_histories: Dict[str, List[Dict[str, List[float]]]], 
         save_clean_figure(fig, outdir / f"loss_curves_{model_name}.png")
 
 
+PATHWAY_GENE_SETS: Dict[str, set] = {
+    "cytotoxic_effector": {"CCL4", "CCL5", "NKG7", "GNLY", "KLRD1", "FGFBP2", "PRF1", "GZMA", "GZMB", "GZMH", "CTSW", "CST7"},
+    "interferon_response": {"STAT1", "STAT2", "IRF1", "IRF7", "ISG15", "IFIT1", "IFIT2", "IFIT3", "IFI6", "IFI44L", "MX1", "OAS1", "OAS2", "OASL"},
+    "t_cell_activation": {"CD3D", "CD3E", "CD247", "IL2RB", "LCK", "TRAC", "TRBC1", "TRBC2", "LAT", "ZAP70"},
+    "exhaustion_checkpoint": {"PDCD1", "CTLA4", "LAG3", "TIGIT", "HAVCR2", "TOX", "ENTPD1", "CXCL13"},
+    "memory_naive": {"CCR7", "LTB", "IL7R", "MAL", "TCF7", "LEF1", "SELL", "MALAT1"},
+    "mitochondrial": {"MT-CO1", "MT-CO2", "MT-CO3", "MT-CYB", "MT-ND1", "MT-ND2", "MT-ND3", "MT-ND4", "MT-ND4L", "MT-ND5", "MT-ND6", "MT-ATP6", "MT-ATP8"},
+}
+
+
+def integrated_gradients(model: Any, X: np.ndarray, steps: int = 32, batch_size: int = 64) -> np.ndarray:
+    """Integrated gradients from an all-zero reference in bounded batches."""
+    import tensorflow as tf
+
+    X = np.asarray(X, dtype=np.float32)
+    output = np.zeros_like(X, dtype=np.float32)
+    baseline = np.zeros((1, X.shape[1]), dtype=np.float32)
+    alphas = np.linspace(0.0, 1.0, max(2, steps) + 1, dtype=np.float32)[1:]
+    for start, end in chunk_ranges(len(X), batch_size):
+        batch = X[start:end]
+        gradient_sum = np.zeros_like(batch, dtype=np.float32)
+        delta = batch - baseline
+        for alpha in alphas:
+            tensor = tf.convert_to_tensor(baseline + alpha * delta)
+            with tf.GradientTape() as tape:
+                tape.watch(tensor)
+                prediction = model(tensor, training=False)
+            gradient_sum += np.asarray(tape.gradient(prediction, tensor), dtype=np.float32)
+        output[start:end] = delta * (gradient_sum / len(alphas))
+    return output
+
+
+def attribution_modality(feature_name: str) -> str:
+    if feature_name.startswith("gene_pc_"):
+        return "gene_expression_pc"
+    if feature_name.startswith(("tra_", "trb_", "tcr_")):
+        return "tcr"
+    return "other"
+
+
 def compute_shap_summary(model_name: str, records: List[FitRecord], data: CellData, outdir: Path, args: argparse.Namespace) -> None:
-    try:
-        import shap
-    except ImportError:
-        shap = None
-        LOGGER.warning("SHAP is not installed; exporting model-native attribution fallback")
-    values_by_feature: List[np.ndarray] = []
-    feature_names: Optional[List[str]] = None
+    """Export fold-stable Transformer IG or tree SHAP with gene back-projection."""
+    feature_rows: List[Dict[str, Any]] = []
     gene_rows: List[Dict[str, Any]] = []
+    fold_vectors: Dict[int, np.ndarray] = {}
+    feature_names: Optional[List[str]] = None
     for record in records:
-        if record.model is None or record.test_features is None:
+        if record.model is None or record.test_features is None or len(record.test_features) == 0:
             continue
-        X = record.test_features[: args.shap_cells]
-        if len(X) == 0:
-            continue
-        background = X[: min(50, len(X))]
+        take = min(args.shap_cells, len(record.test_features))
+        selected = np.linspace(0, len(record.test_features) - 1, take, dtype=int)
+        X = np.asarray(record.test_features[selected], dtype=np.float32)
         try:
-            if shap is None:
-                raise RuntimeError("SHAP unavailable")
             if model_name == "XGBoost":
-                explainer = shap.TreeExplainer(record.model)
-                raw = explainer.shap_values(X)
-                shap_values = raw[0] if isinstance(raw, list) else raw
+                import shap
+
+                raw = shap.TreeExplainer(record.model).shap_values(X)
+                attributions = raw[0] if isinstance(raw, list) else raw
+                attributions = np.asarray(attributions, dtype=np.float32)
             else:
-                explainer = shap.DeepExplainer(record.model, background)
-                raw = explainer.shap_values(X, check_additivity=False)
-                shap_values = raw[0] if isinstance(raw, list) else raw
-            shap_values = np.asarray(shap_values, dtype=np.float32)
-            if shap_values.ndim == 3:
-                shap_values = shap_values[:, :, 0]
+                attributions = integrated_gradients(record.model, X, args.ig_steps, args.interpret_batch_size)
         except Exception as exc:
-            LOGGER.warning("SHAP failed for %s fold %s (%s); using permutation-free gradient fallback", model_name, record.fold, exc)
-            if model_name == "XGBoost":
-                shap_values = np.tile(np.asarray(getattr(record.model, "feature_importances_", np.zeros(X.shape[1]))), (len(X), 1)).astype(np.float32)
-            else:
-                try:
-                    import tensorflow as tf
-                    with tf.GradientTape() as tape:
-                        tensor = tf.convert_to_tensor(X)
-                        tape.watch(tensor)
-                        pred = record.model(tensor, training=False)
-                    shap_values = np.asarray(tape.gradient(pred, tensor), dtype=np.float32)
-                except Exception:
-                    continue
-        values_by_feature.append(shap_values)
+            LOGGER.warning("Attribution failed for %s fold %s: %s", model_name, record.fold, exc)
+            continue
+        if attributions.ndim == 3:
+            attributions = attributions[:, :, 0]
         feature_names = record.feature_names
+        mean_abs = np.mean(np.abs(attributions), axis=0)
+        mean_signed = np.mean(attributions, axis=0)
+        fold_vectors[record.fold] = mean_abs
+        ranks = stats.rankdata(-mean_abs, method="average")
+        for index, name in enumerate(feature_names):
+            feature_rows.append({
+                "model": model_name, "fold": record.fold, "feature": name,
+                "modality": attribution_modality(name), "mean_abs_attribution": float(mean_abs[index]),
+                "mean_signed_attribution": float(mean_signed[index]), "rank": float(ranks[index]),
+            })
         preprocessor = joblib.load(record.preprocessor_path)
-        loadings = preprocessor["pca_loadings_gene_space"]
-        n_pcs = loadings.shape[0]
-        if n_pcs and shap_values.shape[1] >= n_pcs:
-            pc_attr = shap_values[:, :n_pcs]
-            gene_attr = np.abs(pc_attr) @ np.abs(loadings)
-            mean_gene = gene_attr.mean(axis=0)
-            for gene, score in zip(data.gene_names, mean_gene):
-                gene_rows.append({"model": model_name, "fold": record.fold, "gene": gene, "mean_abs_attribution": float(score)})
-    if not values_by_feature or feature_names is None:
+        loadings = np.asarray(preprocessor["pca_loadings_gene_space"], dtype=np.float32)
+        n_pcs = min(loadings.shape[0], attributions.shape[1])
+        if n_pcs:
+            absolute_gene = np.abs(attributions[:, :n_pcs]) @ np.abs(loadings[:n_pcs])
+            signed_gene = attributions[:, :n_pcs] @ loadings[:n_pcs]
+            for gene, abs_score, signed_score in zip(data.gene_names, absolute_gene.mean(axis=0), signed_gene.mean(axis=0)):
+                gene_rows.append({
+                    "model": model_name, "fold": record.fold, "gene": str(gene),
+                    "mean_abs_attribution": float(abs_score), "mean_signed_attribution": float(signed_score),
+                })
+    if not feature_rows or feature_names is None:
+        LOGGER.warning("No interpretability values were produced for %s", model_name)
         return
-    values = np.vstack(values_by_feature)
-    mean_abs = np.mean(np.abs(values), axis=0)
-    order = np.argsort(mean_abs)[-25:][::-1]
-    fig, ax = plt.subplots(figsize=(6.5, 5.5))
-    ax.barh(np.arange(len(order)), mean_abs[order][::-1], color="#4c78a8")
-    ax.set_yticks(np.arange(len(order)), [feature_names[i] for i in order][::-1], fontsize=7)
-    ax.set_xlabel("Mean absolute attribution")
+
+    feature_by_fold = pd.DataFrame(feature_rows)
+    feature_by_fold.to_csv(outdir / f"{model_name}_feature_attributions_by_fold.csv", index=False)
+    feature_summary = feature_by_fold.groupby(["model", "feature", "modality"], as_index=False).agg(
+        mean_abs_attribution=("mean_abs_attribution", "mean"),
+        sd_abs_attribution=("mean_abs_attribution", "std"),
+        mean_signed_attribution=("mean_signed_attribution", "mean"),
+        folds_top25=("rank", lambda values: int(np.sum(np.asarray(values) <= 25))),
+    ).sort_values("mean_abs_attribution", ascending=False)
+    feature_summary["rank"] = np.arange(1, len(feature_summary) + 1)
+    feature_summary.to_csv(outdir / f"{model_name}_feature_attributions.csv", index=False)
+
+    modality = feature_by_fold.groupby(["fold", "modality"], as_index=False)["mean_abs_attribution"].sum()
+    modality["fraction"] = modality["mean_abs_attribution"] / modality.groupby("fold")["mean_abs_attribution"].transform("sum")
+    modality.to_csv(outdir / f"{model_name}_modality_attribution.csv", index=False)
+
+    stability_rows: List[Dict[str, Any]] = []
+    for fold_a, fold_b in itertools.combinations(sorted(fold_vectors), 2):
+        vector_a, vector_b = fold_vectors[fold_a], fold_vectors[fold_b]
+        top_a = set(np.argsort(vector_a)[-25:])
+        top_b = set(np.argsort(vector_b)[-25:])
+        rho = stats.spearmanr(vector_a, vector_b).statistic
+        stability_rows.append({
+            "fold_a": fold_a, "fold_b": fold_b, "spearman_rank_correlation": float(rho),
+            "top25_jaccard": float(len(top_a & top_b) / len(top_a | top_b)),
+        })
+    pd.DataFrame(stability_rows).to_csv(outdir / f"{model_name}_attribution_stability.csv", index=False)
+
+    top = feature_summary.head(25).iloc[::-1]
+    fig, ax = plt.subplots(figsize=(7.2, 6.0))
+    ax.barh(np.arange(len(top)), top["mean_abs_attribution"], xerr=top["sd_abs_attribution"].fillna(0), color="#4c78a8", alpha=0.9)
+    ax.set_yticks(np.arange(len(top)), top["feature"], fontsize=7)
+    ax.set_xlabel("Mean absolute integrated-gradient attribution" if model_name != "XGBoost" else "Mean absolute SHAP attribution")
     fig.tight_layout()
     save_clean_figure(fig, outdir / "shap_summary_plot.png")
+    save_clean_figure(
+        _attribution_direction_plot(feature_summary.head(20), model_name),
+        outdir / f"{model_name}_signed_attribution_plot.png",
+    )
+
     if gene_rows:
-        genes = pd.DataFrame(gene_rows).groupby("gene", as_index=False)["mean_abs_attribution"].mean().sort_values("mean_abs_attribution", ascending=False)
-        genes.insert(0, "model", model_name)
+        gene_by_fold = pd.DataFrame(gene_rows)
+        gene_by_fold.to_csv(outdir / f"{model_name}_gene_attributions_by_fold.csv", index=False)
+        genes = gene_by_fold.groupby(["model", "gene"], as_index=False).agg(
+            mean_abs_attribution=("mean_abs_attribution", "mean"),
+            sd_abs_attribution=("mean_abs_attribution", "std"),
+            mean_signed_attribution=("mean_signed_attribution", "mean"),
+        ).sort_values("mean_abs_attribution", ascending=False)
+        genes["rank"] = np.arange(1, len(genes) + 1)
         genes.to_csv(outdir / "shap_gene_attributions.csv", index=False)
+        pathway_attribution_summary(genes, outdir, args.seed)
+
+
+def _attribution_direction_plot(summary: pd.DataFrame, model_name: str) -> plt.Figure:
+    ordered = summary.sort_values("mean_signed_attribution")
+    colors = np.where(ordered["mean_signed_attribution"] >= 0, "#d95f02", "#1b9e77")
+    fig, ax = plt.subplots(figsize=(7.0, 5.2))
+    ax.barh(np.arange(len(ordered)), ordered["mean_signed_attribution"], color=colors)
+    ax.axvline(0, color="0.25", lw=0.8)
+    ax.set_yticks(np.arange(len(ordered)), ordered["feature"], fontsize=7)
+    ax.set_xlabel(f"Mean signed {model_name} attribution")
+    fig.tight_layout()
+    return fig
+
+
+def pathway_attribution_summary(genes: pd.DataFrame, outdir: Path, seed: int) -> None:
+    score_by_gene = dict(zip(genes["gene"].astype(str), genes["mean_abs_attribution"].astype(float)))
+    universe = np.asarray(list(score_by_gene.values()), dtype=float)
+    rng = np.random.default_rng(seed + 4242)
+    rows = []
+    for pathway, members in PATHWAY_GENE_SETS.items():
+        observed = np.asarray([score_by_gene[gene] for gene in members if gene in score_by_gene], dtype=float)
+        if len(observed) == 0:
+            continue
+        null = np.asarray([rng.choice(universe, size=len(observed), replace=False).mean() for _ in range(2000)])
+        rows.append({
+            "pathway": pathway, "n_genes_available": len(observed),
+            "mean_abs_attribution": float(observed.mean()),
+            "enrichment_ratio": float(observed.mean() / max(universe.mean(), 1e-12)),
+            "empirical_p_value": float((1 + np.sum(null >= observed.mean())) / (len(null) + 1)),
+            "genes_available": ";".join(sorted(gene for gene in members if gene in score_by_gene)),
+        })
+    columns = [
+        "pathway", "n_genes_available", "mean_abs_attribution",
+        "enrichment_ratio", "empirical_p_value", "genes_available",
+    ]
+    pathway_df = pd.DataFrame(rows, columns=columns)
+    pathway_df.to_csv(outdir / "transformer_pathway_attribution_enrichment.csv", index=False)
+    if pathway_df.empty:
+        LOGGER.warning("No predefined pathway genes were present in the attribution table")
+        return
+    pathway_df = pathway_df.sort_values("enrichment_ratio", ascending=False)
+    fig, ax = plt.subplots(figsize=(6.5, 3.8))
+    ordered = pathway_df.sort_values("enrichment_ratio")
+    ax.barh(np.arange(len(ordered)), ordered["enrichment_ratio"], color="#59a14f")
+    ax.axvline(1.0, color="0.4", ls="--", lw=0.8)
+    ax.set_yticks(np.arange(len(ordered)), ordered["pathway"], fontsize=8)
+    ax.set_xlabel("Attribution enrichment ratio")
+    fig.tight_layout()
+    save_clean_figure(fig, outdir / "transformer_pathway_attribution_enrichment.png")
 
 
 def cohort_exports(data: CellData, outdir: Path) -> None:
     summary = data.metadata.groupby(["patient_id", "response", "timepoint", "sample_id"], as_index=False).agg(n_cells=("y", "size"), productive_tra=("cdr3_tra", lambda s: np.mean([bool(clean_sequence(v)) for v in s])), productive_trb=("cdr3_trb", lambda s: np.mean([bool(clean_sequence(v)) for v in s])))
     summary.to_csv(outdir / "cohort_summary.csv", index=False)
+
+
+def cohort_robustness_exports(data: CellData, outdir: Path) -> None:
+    """TCR missingness/confounding and clonotype summaries requested in review."""
+    frame = data.metadata.copy()
+    frame["tra_present"] = [bool(clean_sequence(value)) for value in data.cdr3_tra]
+    frame["trb_present"] = [bool(clean_sequence(value)) for value in data.cdr3_trb]
+    frame["tcr_present_any"] = frame["tra_present"] | frame["trb_present"]
+    frame["tcr_missing_any"] = ~frame["tcr_present_any"]
+    grouping_rows = []
+    for grouping in (["patient_id"], ["response"], ["timepoint"], ["patient_id", "timepoint"], ["response", "timepoint"]):
+        current = frame.groupby(grouping, dropna=False).agg(
+            n_cells=("y", "size"), n_tcr_missing=("tcr_missing_any", "sum"),
+            productive_tra_rate=("tra_present", "mean"), productive_trb_rate=("trb_present", "mean"),
+            productive_any_rate=("tcr_present_any", "mean"),
+        ).reset_index()
+        current.insert(0, "grouping", "+".join(grouping))
+        grouping_rows.append(current)
+    pd.concat(grouping_rows, ignore_index=True).to_csv(outdir / "tcr_missingness_by_group.csv", index=False)
+
+    tests = []
+    for column in ("response", "patient_id", "timepoint"):
+        table = pd.crosstab(frame[column], frame["tcr_missing_any"])
+        if table.shape == (2, 2):
+            odds, p_value = stats.fisher_exact(table.to_numpy())
+            method = "Fisher exact"
+            statistic = odds
+        elif table.shape[0] > 1 and table.shape[1] > 1:
+            statistic, p_value, _, _ = stats.chi2_contingency(table.to_numpy())
+            method = "chi-square"
+        else:
+            statistic, p_value, method = np.nan, np.nan, "not estimable"
+        tests.append({"variable": column, "method": method, "statistic": statistic, "p_value": p_value, "n_cells": len(frame)})
+    pd.DataFrame(tests).to_csv(outdir / "tcr_missingness_association_tests.csv", index=False)
+
+    clonotype_rows = []
+    for keys, group in frame.assign(
+        clonotype=[f"{clean_sequence(a)}|{clean_sequence(b)}" for a, b in zip(data.cdr3_tra, data.cdr3_trb)]
+    ).groupby(["patient_id", "sample_id", "timepoint", "response"], dropna=False):
+        productive = group.loc[group["clonotype"] != "|", "clonotype"]
+        counts = productive.value_counts().to_numpy(dtype=float)
+        frequencies = counts / counts.sum() if counts.size else np.asarray([], dtype=float)
+        shannon = float(-np.sum(frequencies * np.log(frequencies))) if frequencies.size else np.nan
+        clonotype_rows.append({
+            "patient_id": keys[0], "sample_id": keys[1], "timepoint": keys[2], "response": keys[3],
+            "n_cells": len(group), "n_productive_tcr_cells": len(productive),
+            "n_unique_clonotypes": int(len(counts)), "shannon_entropy": shannon,
+            "normalized_clonality": float(1 - shannon / np.log(len(counts))) if len(counts) > 1 else np.nan,
+            "top_clonotype_frequency": float(frequencies.max()) if frequencies.size else np.nan,
+            "expanded_clonotype_cell_fraction": float(counts[counts >= 2].sum() / counts.sum()) if counts.size else np.nan,
+        })
+    pd.DataFrame(clonotype_rows).to_csv(outdir / "clonotype_diversity_by_sample.csv", index=False)
+
+    audit = {
+        "sample_level_repertoire_features_used_for_prediction": False,
+        "umap_features_used_for_prediction": False,
+        "feature_engineering_fit_scope": "outer-fold training patients only",
+        "effective_independent_response_units": int(frame["patient_id"].nunique()),
+        "interpretation": "Repertoire summaries are descriptive only and are not assigned to cells as predictors.",
+    }
+    (outdir / "leakage_and_feature_audit.json").write_text(json.dumps(audit, indent=2), encoding="utf-8")
+
+
+def expected_calibration_error(y_true: np.ndarray, probabilities: np.ndarray, n_bins: int = 10) -> Tuple[float, float]:
+    edges = np.linspace(0, 1, n_bins + 1)
+    ece, maximum = 0.0, 0.0
+    for low, high in zip(edges[:-1], edges[1:]):
+        mask = (probabilities >= low) & (probabilities < high if high < 1 else probabilities <= high)
+        if not mask.any():
+            continue
+        gap = abs(float(np.mean(y_true[mask])) - float(np.mean(probabilities[mask])))
+        ece += gap * float(mask.mean())
+        maximum = max(maximum, gap)
+    return ece, maximum
+
+
+def export_prediction_robustness(all_predictions: Dict[str, pd.DataFrame], outdir: Path, args: argparse.Namespace) -> None:
+    calibration_rows, permutation_rows, threshold_rows, decision_rows, patient_rows = [], [], [], [], []
+    patient_frames: Dict[str, pd.DataFrame] = {}
+    for model_name, predictions in all_predictions.items():
+        patient = aggregate_predictions(predictions, "patient")
+        patient_frames[model_name] = patient
+        patient.insert(0, "model", model_name)
+        patient_rows.append(patient)
+        for unit, frame in (("cell", predictions), ("patient", patient)):
+            y_values = frame["y"].to_numpy(dtype=int)
+            probabilities = frame["probability"].to_numpy(dtype=float)
+            ece, mce = expected_calibration_error(y_values, probabilities, min(10, max(2, len(np.unique(probabilities)))))
+            calibration_rows.append({
+                "model": model_name, "unit": unit, "n_units": len(frame),
+                "brier": brier_score_loss(y_values, probabilities), "log_loss": log_loss(y_values, np.clip(probabilities, 1e-6, 1 - 1e-6), labels=[0, 1]),
+                "expected_calibration_error": ece, "maximum_calibration_error": mce,
+                "calibration_in_the_large": float(np.mean(probabilities) - np.mean(y_values)),
+            })
+        y_patient = patient["y"].to_numpy(dtype=int)
+        probability_patient = patient["probability"].to_numpy(dtype=float)
+        observed_auc = roc_auc_score(y_patient, probability_patient)
+        assignments = []
+        for positive_indices in itertools.combinations(range(len(patient)), int(y_patient.sum())):
+            permuted = np.zeros(len(patient), dtype=int)
+            permuted[list(positive_indices)] = 1
+            assignments.append(roc_auc_score(permuted, probability_patient))
+        permutation_rows.append({
+            "model": model_name, "observed_patient_auc": observed_auc,
+            "n_exact_balanced_label_assignments": len(assignments),
+            "exact_one_sided_p_value": float(np.mean(np.asarray(assignments) >= observed_auc)),
+            "null_auc_mean": float(np.mean(assignments)), "null_auc_sd": float(np.std(assignments, ddof=1)),
+            "null_auc_values": ";".join(f"{value:.6g}" for value in assignments),
+        })
+        for threshold in np.linspace(0.05, 0.95, 19):
+            predicted = (probability_patient >= threshold).astype(int)
+            tn, fp, fn, tp = confusion_matrix(y_patient, predicted, labels=[0, 1]).ravel()
+            threshold_rows.append({
+                "model": model_name, "threshold": threshold,
+                "accuracy": accuracy_score(y_patient, predicted),
+                "sensitivity": tp / (tp + fn) if tp + fn else np.nan,
+                "specificity": tn / (tn + fp) if tn + fp else np.nan,
+                "f1": f1_score(y_patient, predicted, zero_division=0),
+            })
+            prevalence = float(np.mean(y_patient))
+            net_benefit = tp / len(y_patient) - fp / len(y_patient) * threshold / (1 - threshold)
+            treat_all = prevalence - (1 - prevalence) * threshold / (1 - threshold)
+            decision_rows.extend([
+                {"model": model_name, "threshold": threshold, "strategy": "model", "net_benefit": net_benefit},
+                {"model": model_name, "threshold": threshold, "strategy": "treat_all", "net_benefit": treat_all},
+                {"model": model_name, "threshold": threshold, "strategy": "treat_none", "net_benefit": 0.0},
+            ])
+    pd.concat(patient_rows, ignore_index=True).to_csv(outdir / "patient_prediction_summary_all_models.csv", index=False)
+    pd.DataFrame(calibration_rows).to_csv(outdir / "calibration_metrics.csv", index=False)
+    pd.DataFrame(permutation_rows).to_csv(outdir / "exact_patient_label_permutation_tests.csv", index=False)
+    pd.DataFrame(threshold_rows).to_csv(outdir / "patient_threshold_sensitivity.csv", index=False)
+    pd.DataFrame(decision_rows).to_csv(outdir / "decision_curve_analysis.csv", index=False)
+    plot_patient_predictions(patient_frames, outdir)
+    plot_patient_confusion_matrices(patient_frames, outdir)
+    plot_calibration_curves(all_predictions, outdir)
+
+
+def plot_patient_predictions(patient_frames: Dict[str, pd.DataFrame], outdir: Path) -> None:
+    fig, axes = plt.subplots(1, len(patient_frames), figsize=(3.0 * len(patient_frames), 3.5), sharey=True)
+    axes = np.atleast_1d(axes)
+    for ax, (model_name, frame) in zip(axes, patient_frames.items()):
+        colors = np.where(frame["y"].to_numpy() == 1, "#d95f02", "#1b9e77")
+        ax.bar(frame["patient_id"], frame["probability"], color=colors)
+        ax.axhline(0.5, color="0.3", ls="--", lw=0.8)
+        ax.set_xlabel(model_name)
+        ax.tick_params(axis="x", rotation=45, labelsize=7)
+    axes[0].set_ylabel("Held-out patient response probability")
+    fig.tight_layout()
+    save_clean_figure(fig, outdir / "patient_prediction_summary.png")
+
+
+def plot_patient_confusion_matrices(patient_frames: Dict[str, pd.DataFrame], outdir: Path) -> None:
+    fig, axes = plt.subplots(1, len(patient_frames), figsize=(2.7 * len(patient_frames), 2.8))
+    axes = np.atleast_1d(axes)
+    for ax, (model_name, frame) in zip(axes, patient_frames.items()):
+        matrix = confusion_matrix(frame["y"], frame["probability"] >= 0.5, labels=[0, 1])
+        ax.imshow(matrix, cmap="Blues", vmin=0, vmax=max(1, matrix.max()))
+        for (row, col), value in np.ndenumerate(matrix):
+            ax.text(col, row, str(value), ha="center", va="center", fontsize=10)
+        ax.set_xticks([0, 1], ["NR", "R"])
+        ax.set_yticks([0, 1], ["NR", "R"])
+        ax.set_xlabel(model_name)
+    axes[0].set_ylabel("Observed")
+    fig.tight_layout()
+    save_clean_figure(fig, outdir / "patient_confusion_matrices.png")
+
+
+def plot_calibration_curves(all_predictions: Dict[str, pd.DataFrame], outdir: Path) -> None:
+    fig, axes = plt.subplots(1, 2, figsize=(9.0, 4.0))
+    for ax in axes:
+        ax.plot([0, 1], [0, 1], color="0.4", ls="--", lw=0.8)
+    for model_name, predictions in all_predictions.items():
+        cell = predictions.copy()
+        cell["bin"] = pd.qcut(cell["probability"], q=min(10, cell["probability"].nunique()), duplicates="drop")
+        cell_curve = cell.groupby("bin", observed=True).agg(
+            predicted=("probability", "mean"), observed=("y", "mean")
+        )
+        axes[0].plot(cell_curve["predicted"], cell_curve["observed"], marker="o", lw=1.0, label=model_name)
+        patient = aggregate_predictions(predictions, "patient")
+        axes[1].scatter(patient["probability"], patient["y"], s=28, label=model_name, alpha=0.8)
+    axes[0].set_xlabel("Mean predicted probability")
+    axes[0].set_ylabel("Observed response fraction")
+    axes[1].set_xlabel("Held-out patient probability")
+    axes[1].set_ylabel("Observed patient response")
+    axes[0].legend(frameon=False, fontsize=7)
+    fig.tight_layout()
+    save_clean_figure(fig, outdir / "patient_calibration_plot.png")
+
+
+def transformer_ood_stress_tests(records: List[FitRecord], data: CellData, outdir: Path, seed: int) -> None:
+    rows = []
+    rng = np.random.default_rng(seed + 707)
+    for record in records:
+        if record.model is None or record.test_features is None:
+            continue
+        X = np.asarray(record.test_features, dtype=np.float32)
+        y = data.metadata.iloc[record.test_indices]["y"].to_numpy(dtype=int)
+        scenarios: Dict[str, np.ndarray] = {"unperturbed": X}
+        scale = np.std(X, axis=0, keepdims=True)
+        for amount in (0.05, 0.10, 0.20):
+            scenarios[f"gaussian_noise_{amount:.2f}"] = X + rng.normal(0, amount, size=X.shape).astype(np.float32) * scale
+        for fraction in (0.10, 0.25, 0.50):
+            mask = rng.random(X.shape) < fraction
+            scenarios[f"random_feature_mask_{fraction:.2f}"] = np.where(mask, 0.0, X)
+        n_pcs = sum(name.startswith("gene_pc_") for name in record.feature_names)
+        gene_masked = X.copy()
+        gene_masked[:, :n_pcs] = 0
+        scenarios["gene_pc_ablation"] = gene_masked
+        tcr_masked = X.copy()
+        tcr_masked[:, n_pcs:] = 0
+        scenarios["tcr_ablation"] = tcr_masked
+        scenario_names = list(scenarios)
+        stacked = np.vstack([scenarios[name] for name in scenario_names])
+        stacked_probabilities = predict_model("Transformer", record.model, stacked)
+        baseline = stacked_probabilities[: len(X)]
+        base_patient = float(np.mean(baseline))
+        for scenario_index, scenario in enumerate(scenario_names):
+            probabilities = stacked_probabilities[scenario_index * len(X) : (scenario_index + 1) * len(X)]
+            patient_probability = float(np.mean(probabilities))
+            rows.append({
+                "fold": record.fold, "held_out_patient": record.held_out_patient, "scenario": scenario,
+                "patient_label": int(y[0]),
+                "cell_auc": roc_auc_score(y, probabilities) if len(np.unique(y)) == 2 else np.nan,
+                "cell_brier": brier_score_loss(y, probabilities),
+                "patient_probability": patient_probability,
+                "absolute_patient_probability_shift": abs(patient_probability - base_patient),
+                "patient_label_flip": int((patient_probability >= 0.5) != (base_patient >= 0.5)),
+            })
+    frame = pd.DataFrame(rows)
+    frame.to_csv(outdir / "transformer_ood_stress_tests_by_fold.csv", index=False)
+    if not frame.empty:
+        summary = frame.groupby("scenario", as_index=False).agg(
+            mean_absolute_probability_shift=("absolute_patient_probability_shift", "mean"),
+            max_absolute_probability_shift=("absolute_patient_probability_shift", "max"),
+            patient_label_flips=("patient_label_flip", "sum"),
+            mean_cell_brier=("cell_brier", "mean"),
+        )
+        patient_metric_rows = []
+        for scenario, current in frame.groupby("scenario"):
+            metrics = compute_metrics(current["patient_label"].to_numpy(), current["patient_probability"].to_numpy())
+            patient_metric_rows.append({"scenario": scenario, **{f"patient_{key}": value for key, value in metrics.items()}})
+        summary = summary.merge(pd.DataFrame(patient_metric_rows), on="scenario", how="left")
+        summary.to_csv(outdir / "transformer_ood_stress_test_summary.csv", index=False)
 
 
 def available_gpu_count() -> int:
@@ -1189,6 +1558,17 @@ def task_signature(model_name: str, fold: int, X: np.ndarray, args: argparse.Nam
     return hashlib.sha256(json.dumps(settings, sort_keys=True).encode("utf-8")).hexdigest()
 
 
+def preprocessor_signature(data: CellData, fold: int, args: argparse.Namespace) -> str:
+    settings = {
+        "fold": fold, "data_shape": list(data.X.shape), "seed": args.seed,
+        "timepoint_mode": args.timepoint_mode, "feature_set": args.feature_set,
+        "n_top_genes": args.n_top_genes, "n_pcs": args.n_pcs,
+        "pca_batch_size": args.pca_batch_size, "max_kmers": args.max_kmers,
+        "max_train_cells_per_patient": args.max_train_cells_per_patient,
+    }
+    return hashlib.sha256(json.dumps(settings, sort_keys=True).encode("utf-8")).hexdigest()
+
+
 def load_completed_task(
     model_name: str,
     fold: int,
@@ -1205,7 +1585,8 @@ def load_completed_task(
     metadata_path = checkpoint_dir / f"{model_name}_fold_{fold}.json"
     predictions_path = checkpoint_dir / f"{model_name}_fold_{fold}.npz"
     signature = task_signature(model_name, fold, X, args)
-    if allow_checkpoint and artifact.exists() and metadata_path.exists() and predictions_path.exists():
+    checkpoint_bundle_exists = artifact.exists() and metadata_path.exists() and predictions_path.exists()
+    if allow_checkpoint and checkpoint_bundle_exists:
         try:
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             if metadata.get("signature") == signature:
@@ -1217,6 +1598,8 @@ def load_completed_task(
                         dict(metadata.get("tune_history", {})), float(metadata.get("tune_score", np.nan)),
                         str(artifact), test_idx, probabilities, True,
                     )
+            LOGGER.info("Checkpoint budget/signature changed; retraining %s fold %d", model_name, fold)
+            return None
         except Exception as exc:
             LOGGER.warning("Ignoring unreadable checkpoint for %s fold %d: %s", model_name, fold, exc)
     if not (allow_legacy_artifact and artifact.exists()):
@@ -1308,6 +1691,171 @@ def train_model_task(
     )
 
 
+def train_transformer_seed_replica(
+    fold: int,
+    held_out: str,
+    X: np.ndarray,
+    y: np.ndarray,
+    groups: np.ndarray,
+    train_idx: np.ndarray,
+    test_idx: np.ndarray,
+    params: Dict[str, Any],
+    replica_seed: int,
+    outdir_text: str,
+    args: argparse.Namespace,
+) -> Dict[str, Any]:
+    assign_worker_gpu(int(getattr(args, "worker_gpu_count", 0)))
+    robustness_dir = ensure_dir(Path(outdir_text) / "robustness_models")
+    stem = f"Transformer_fold_{fold}_seed_{replica_seed}_epochs_{args.stability_epochs}"
+    artifact = robustness_dir / f"{stem}.keras"
+    prediction_path = robustness_dir / f"{stem}.npz"
+    if artifact.exists() and prediction_path.exists():
+        with np.load(prediction_path) as saved:
+            probabilities = np.asarray(saved["probabilities"], dtype=np.float32)
+        if len(probabilities) == len(test_idx):
+            return {
+                "fold": fold, "held_out_patient": held_out, "seed": replica_seed,
+                "test_indices": test_idx, "probabilities": probabilities, "model_path": str(artifact),
+            }
+    relative = sample_group_indices(groups[train_idx], args.max_train_cells_per_patient, replica_seed + fold)
+    selected_train = train_idx[relative]
+    model, _ = fit_neural(
+        X[selected_train], y[selected_train], params, "Transformer", replica_seed + fold,
+        args.stability_epochs, groups_train=groups[selected_train],
+    )
+    probabilities = predict_model("Transformer", model, X[test_idx])
+    model.save(artifact, include_optimizer=False)
+    with prediction_path.open("wb") as handle:
+        np.savez_compressed(handle, probabilities=probabilities)
+    try:
+        _, keras, _ = keras_available()
+        keras.backend.clear_session()
+    except Exception:
+        pass
+    del model
+    gc.collect()
+    return {
+        "fold": fold, "held_out_patient": held_out, "seed": replica_seed,
+        "test_indices": test_idx, "probabilities": probabilities, "model_path": str(artifact),
+    }
+
+
+def export_transformer_seed_stability(
+    replicas: List[Dict[str, Any]],
+    primary_results: List[ModelTaskResult],
+    data: CellData,
+    outdir: Path,
+    primary_seed: int,
+) -> None:
+    rows = []
+    primary_by_fold = {result.fold: result for result in primary_results if result.model_name == "Transformer"}
+    for fold, result in primary_by_fold.items():
+        for index, probability in zip(result.test_indices, result.test_probabilities):
+            rows.append({
+                "fold": fold, "patient_id": result.held_out_patient, "seed": primary_seed,
+                "cell_index": int(index), "y": int(data.metadata.iloc[index]["y"]), "probability": float(probability),
+            })
+    for replica in replicas:
+        for index, probability in zip(replica["test_indices"], replica["probabilities"]):
+            rows.append({
+                "fold": replica["fold"], "patient_id": replica["held_out_patient"], "seed": replica["seed"],
+                "cell_index": int(index), "y": int(data.metadata.iloc[index]["y"]), "probability": float(probability),
+            })
+    predictions = pd.DataFrame(rows)
+    predictions.to_csv(outdir / "transformer_seed_stability_cell_predictions.csv.gz", index=False, compression="gzip")
+    patient = predictions.groupby(["seed", "patient_id"], as_index=False).agg(y=("y", "first"), probability=("probability", "mean"))
+    patient.to_csv(outdir / "transformer_seed_stability_patient_predictions.csv", index=False)
+    metric_rows = []
+    for replica_seed, frame in patient.groupby("seed"):
+        metrics = compute_metrics(frame["y"].to_numpy(), frame["probability"].to_numpy())
+        metric_rows.append({"seed": replica_seed, **metrics})
+    pd.DataFrame(metric_rows).to_csv(outdir / "transformer_seed_stability_metrics.csv", index=False)
+    pivot = patient.pivot(index="patient_id", columns="seed", values="probability")
+    correlation = pivot.corr(method="spearman")
+    correlation.to_csv(outdir / "transformer_seed_probability_rank_correlation.csv")
+
+
+def train_transformer_label_permutation(
+    assignment_id: int,
+    fold: int,
+    held_out: str,
+    X: np.ndarray,
+    permuted_y: np.ndarray,
+    groups: np.ndarray,
+    train_idx: np.ndarray,
+    test_idx: np.ndarray,
+    params: Dict[str, Any],
+    outdir_text: str,
+    args: argparse.Namespace,
+) -> Dict[str, Any]:
+    assign_worker_gpu(int(getattr(args, "worker_gpu_count", 0)))
+    output_dir = ensure_dir(Path(outdir_text) / "permutation_models")
+    stem = f"assignment_{assignment_id}_fold_{fold}_epochs_{args.permutation_epochs}"
+    prediction_path = output_dir / f"{stem}.npz"
+    model_path = output_dir / f"{stem}.keras"
+    if prediction_path.exists():
+        with np.load(prediction_path) as saved:
+            probability = float(saved["patient_probability"])
+        return {
+            "assignment_id": assignment_id, "fold": fold, "held_out_patient": held_out,
+            "permuted_label": int(permuted_y[test_idx][0]), "patient_probability": probability,
+        }
+    relative = sample_group_indices(groups[train_idx], args.permutation_cells_per_patient, args.seed + assignment_id * 100 + fold)
+    selected = train_idx[relative]
+    model, _ = fit_neural(
+        X[selected], permuted_y[selected], params, "Transformer",
+        args.seed + assignment_id * 100 + fold, args.permutation_epochs,
+        groups_train=groups[selected],
+    )
+    probability = float(np.mean(predict_model("Transformer", model, X[test_idx])))
+    model.save(model_path, include_optimizer=False)
+    with prediction_path.open("wb") as handle:
+        np.savez_compressed(handle, patient_probability=probability)
+    try:
+        _, keras, _ = keras_available()
+        keras.backend.clear_session()
+    except Exception:
+        pass
+    del model
+    gc.collect()
+    return {
+        "assignment_id": assignment_id, "fold": fold, "held_out_patient": held_out,
+        "permuted_label": int(permuted_y[test_idx][0]), "patient_probability": probability,
+    }
+
+
+def export_retrained_label_permutation_test(
+    rows: List[Dict[str, Any]],
+    primary_results: List[ModelTaskResult],
+    data: CellData,
+    outdir: Path,
+) -> None:
+    frame = pd.DataFrame(rows)
+    frame.to_csv(outdir / "transformer_retrained_label_permutation_predictions.csv", index=False)
+    null_rows = []
+    for assignment_id, assignment in frame.groupby("assignment_id"):
+        metrics = compute_metrics(
+            assignment["permuted_label"].to_numpy(dtype=int),
+            assignment["patient_probability"].to_numpy(dtype=float),
+        )
+        null_rows.append({"assignment_id": assignment_id, **metrics})
+    null_metrics = pd.DataFrame(null_rows)
+    primary = []
+    for result in primary_results:
+        primary.append({
+            "patient_id": result.held_out_patient,
+            "y": int(data.metadata.iloc[result.test_indices[0]]["y"]),
+            "probability": float(np.mean(result.test_probabilities)),
+        })
+    primary_frame = pd.DataFrame(primary)
+    observed_auc = roc_auc_score(primary_frame["y"], primary_frame["probability"])
+    null_metrics["observed_auc"] = observed_auc
+    null_metrics["empirical_p_value"] = float(
+        (1 + np.sum(null_metrics["roc_auc"].to_numpy() >= observed_auc)) / (len(null_metrics) + 1)
+    )
+    null_metrics.to_csv(outdir / "transformer_retrained_label_permutation_metrics.csv", index=False)
+
+
 def run_pipeline(args: argparse.Namespace) -> Path:
     set_seed(args.seed)
     project_root = Path(__file__).resolve().parent
@@ -1322,6 +1870,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     data.metadata["cdr3_trb"] = data.cdr3_trb
     data.metadata["tcr_missing_any"] = [(not clean_sequence(a) and not clean_sequence(b)) for a, b in zip(data.cdr3_tra, data.cdr3_trb)]
     cohort_exports(data, outdir)
+    cohort_robustness_exports(data, outdir)
     LOGGER.info("Cells=%d genes=%d patients=%d samples=%d mode=%s", data.X.shape[0], data.X.shape[1], data.metadata.patient_id.nunique(), data.metadata.sample_id.nunique(), args.timepoint_mode)
 
     y = data.metadata["y"].to_numpy(dtype=int)
@@ -1341,7 +1890,8 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     elif gpu_count > 0:
         parallel_jobs = gpu_count
     else:
-        parallel_jobs = min(4, max(1, os.cpu_count() or 1))
+        parallel_jobs = min(2, max(1, os.cpu_count() or 1))
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
     if parallel_jobs == 1 and any(m != "XGBoost" for m in models):
         assign_worker_gpu(gpu_count)
         keras_available()
@@ -1366,7 +1916,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     best_hyperparameters: Dict[str, Any] = {}
     shap_records: Dict[str, List[FitRecord]] = {m: [] for m in models}
     if args.shap_model in ("auto", "all"):
-        shap_target = "XGBoost" if "XGBoost" in models else models[0]
+        shap_target = "Transformer" if "Transformer" in models else ("XGBoost" if "XGBoost" in models else models[0])
     else:
         shap_target = args.shap_model
 
@@ -1375,12 +1925,18 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     for fold, (train_idx, test_idx, held_out) in enumerate(outer_splits, start=1):
         LOGGER.info("Outer fold %d/%d: held-out patient=%s", fold, len(outer_splits), held_out)
         preprocessor_path = outdir / "preprocessors" / f"fold_{fold}.joblib"
+        preprocessor_metadata_path = outdir / "preprocessors" / f"fold_{fold}.json"
+        expected_preprocessor_signature = preprocessor_signature(data, fold, args)
         reused_preprocessor = False
-        if allow_resume and preprocessor_path.exists():
+        if allow_resume and preprocessor_path.exists() and preprocessor_metadata_path.exists():
             LOGGER.info("Reusing fitted preprocessor for fold %d", fold)
             try:
-                feature_set = load_fold_features(data, preprocessor_path, args)
-                reused_preprocessor = True
+                saved_metadata = json.loads(preprocessor_metadata_path.read_text(encoding="utf-8"))
+                if saved_metadata.get("signature") == expected_preprocessor_signature:
+                    feature_set = load_fold_features(data, preprocessor_path, args)
+                    reused_preprocessor = True
+                else:
+                    LOGGER.info("Preprocessor budget/signature changed; refitting fold %d", fold)
             except Exception as exc:
                 LOGGER.warning("Could not reuse fold %d preprocessor (%s); refitting", fold, exc)
         if not reused_preprocessor:
@@ -1395,6 +1951,10 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                     "pca_loadings_gene_space": feature_set.pca_loadings_gene_space,
                 },
                 preprocessor_path,
+            )
+            preprocessor_metadata_path.write_text(
+                json.dumps({"signature": expected_preprocessor_signature, "fold": fold}, indent=2),
+                encoding="utf-8",
             )
         pca_records.append((fold, feature_set.pca_variance_ratio))
         for pc, variance in enumerate(feature_set.pca_variance_ratio, start=1):
@@ -1449,6 +2009,66 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         LOGGER.info("All model/fold jobs recovered; no retraining required")
 
     context_by_fold = {fold: (test_idx, feature_set, preprocessor_path) for fold, _, test_idx, _, feature_set, preprocessor_path, _ in fold_contexts}
+    seed_replicas: List[Dict[str, Any]] = []
+    transformer_results = [result for result in completed_results if result.model_name == "Transformer"]
+    if args.enable_robustness and args.robustness_replicates > 0 and "Transformer" in models:
+        replica_tasks = []
+        for result in transformer_results:
+            fold_entry = next(entry for entry in fold_contexts if entry[0] == result.fold)
+            _, train_idx, test_idx, held_out, feature_set, _, _ = fold_entry
+            for offset in range(1, args.robustness_replicates + 1):
+                replica_tasks.append((
+                    result.fold, held_out, feature_set.X, train_idx, test_idx,
+                    result.params, args.seed + offset,
+                ))
+        if replica_tasks:
+            LOGGER.info("Training %d Transformer initialization-stability replicas", len(replica_tasks))
+            with joblib.parallel_config(backend="loky", inner_max_num_threads=1):
+                seed_replicas = joblib.Parallel(
+                    n_jobs=min(parallel_jobs, len(replica_tasks)), max_nbytes="10M", mmap_mode="r",
+                )(
+                    joblib.delayed(train_transformer_seed_replica)(
+                        fold, held_out, X, y, groups, train_idx, test_idx, params, replica_seed, str(outdir), args
+                    )
+                    for fold, held_out, X, train_idx, test_idx, params, replica_seed in replica_tasks
+                )
+            export_transformer_seed_stability(seed_replicas, transformer_results, data, outdir, args.seed)
+
+    if args.enable_robustness and args.label_permutation_retrains > 0 and transformer_results:
+        patient_order = sorted(np.unique(groups))
+        true_patient_labels = np.asarray([y[np.flatnonzero(groups == patient)[0]] for patient in patient_order], dtype=int)
+        assignments = []
+        for positive_indices in itertools.combinations(range(len(patient_order)), int(true_patient_labels.sum())):
+            assignment = np.zeros(len(patient_order), dtype=int)
+            assignment[list(positive_indices)] = 1
+            if not np.array_equal(assignment, true_patient_labels):
+                assignments.append(assignment)
+        assignments = assignments[: args.label_permutation_retrains]
+        permutation_tasks = []
+        for assignment_id, assignment in enumerate(assignments, start=1):
+            label_map = dict(zip(patient_order, assignment))
+            permuted_y = np.asarray([label_map[group] for group in groups], dtype=int)
+            for result in transformer_results:
+                fold_entry = next(entry for entry in fold_contexts if entry[0] == result.fold)
+                _, train_idx, test_idx, held_out, feature_set, _, _ = fold_entry
+                permutation_tasks.append((
+                    assignment_id, result.fold, held_out, feature_set.X, permuted_y,
+                    train_idx, test_idx, result.params,
+                ))
+        if permutation_tasks:
+            LOGGER.info("Training %d patient-label permutation negative-control models", len(permutation_tasks))
+            with joblib.parallel_config(backend="loky", inner_max_num_threads=1):
+                permutation_results = joblib.Parallel(
+                    n_jobs=min(parallel_jobs, len(permutation_tasks)), max_nbytes="10M", mmap_mode="r",
+                )(
+                    joblib.delayed(train_transformer_label_permutation)(
+                        assignment_id, fold, held_out, X, permuted_y, groups,
+                        train_idx, test_idx, params, str(outdir), args,
+                    )
+                    for assignment_id, fold, held_out, X, permuted_y, train_idx, test_idx, params in permutation_tasks
+                )
+            export_retrained_label_permutation_test(permutation_results, transformer_results, data, outdir)
+
     for result in sorted(completed_results, key=lambda item: (item.fold, models.index(item.model_name))):
         model_name = result.model_name
         fold = result.fold
@@ -1500,10 +2120,20 @@ def run_pipeline(args: argparse.Namespace) -> Path:
 
     metrics_df = pd.DataFrame(metric_rows)
     metrics_df.to_csv(outdir / "model_evaluation_metrics.csv", index=False)
+    fold_summary = metrics_df.loc[metrics_df["fold"].astype(str) != "pooled"].groupby(
+        ["model", "aggregation", "metric"], as_index=False
+    )["value"].agg(["mean", "std", "min", "max"]).reset_index()
+    fold_summary.to_csv(outdir / "fold_metric_stability_summary.csv", index=False)
     pd.DataFrame([{"model": model, **compute_metrics(df["y"].to_numpy(), df["probability"].to_numpy())} for model, df in all_predictions.items()]).to_csv(outdir / "pooled_cell_metrics.csv", index=False)
     export_loss_curves(loss_histories, outdir)
+    if args.enable_robustness:
+        export_prediction_robustness(all_predictions, outdir, args)
 
     compute_shap_summary(shap_target, shap_records[shap_target], data, outdir, args)
+    if args.enable_robustness and shap_target == "Transformer":
+        LOGGER.info("Running Transformer simulated out-of-distribution stress tests")
+        transformer_ood_stress_tests(shap_records[shap_target], data, outdir, args.seed)
+        LOGGER.info("Transformer out-of-distribution stress tests completed")
     run_metadata = {
         "seed": args.seed,
         "timepoint_mode": args.timepoint_mode,
@@ -1520,6 +2150,12 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         "tune_epochs": args.tune_epochs,
         "epochs": args.epochs,
         "sequence_channels": args.sequence_channels,
+        "integrated_gradient_steps": args.ig_steps,
+        "robustness_replicates": args.robustness_replicates,
+        "stability_epochs": args.stability_epochs,
+        "label_permutation_retrains": args.label_permutation_retrains,
+        "permutation_epochs": args.permutation_epochs,
+        "robustness_enabled": bool(args.enable_robustness),
         "pca_top_50_cumulative_by_fold": {str(fold): float(np.sum(var)) for fold, var in pca_records},
         "software": software_versions(),
     }
@@ -1530,11 +2166,14 @@ def run_pipeline(args: argparse.Namespace) -> Path:
 
 def software_versions() -> Dict[str, str]:
     versions: Dict[str, str] = {"python": sys.version.split()[0], "numpy": np.__version__, "pandas": pd.__version__}
-    for module_name in ("sklearn", "xgboost", "tensorflow", "shap", "scanpy", "anndata"):
+    distributions = {
+        "sklearn": "scikit-learn", "xgboost": "xgboost", "tensorflow": "tensorflow",
+        "shap": "shap", "optuna": "optuna", "scanpy": "scanpy", "anndata": "anndata",
+    }
+    for module_name, distribution_name in distributions.items():
         try:
-            module = __import__(module_name)
-            versions[module_name] = str(getattr(module, "__version__", "unknown"))
-        except Exception:
+            versions[module_name] = importlib.metadata.version(distribution_name)
+        except importlib.metadata.PackageNotFoundError:
             versions[module_name] = "unavailable"
     return versions
 
@@ -1561,11 +2200,20 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--tune-cells-per-patient", type=int, default=2000, help="Cap used by inner tuning; 0 uses all cells")
     parser.add_argument("--n-trials", type=int, default=4, help="Randomized trials per architecture; every architecture is tuned")
     parser.add_argument("--tune-epochs", type=int, default=12)
-    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--sequence-channels", type=int, default=1, help="Pack adjacent scalar features into channels for CNN/BiLSTM/Transformer; values >1 reduce sequence cost")
     parser.add_argument("--bootstrap-replicates", type=int, default=2000)
     parser.add_argument("--shap-model", choices=("auto", "all", *MODEL_NAMES), default="auto")
     parser.add_argument("--shap-cells", type=int, default=500)
+    parser.add_argument("--ig-steps", type=int, default=32, help="Integration steps for neural-network integrated gradients")
+    parser.add_argument("--interpret-batch-size", type=int, default=64)
+    parser.add_argument("--robustness-replicates", type=int, default=2, help="Additional Transformer initialization seeds per outer fold")
+    parser.add_argument("--stability-epochs", type=int, default=20)
+    parser.add_argument("--label-permutation-retrains", type=int, default=5, help="Balanced patient-label assignments retrained as negative controls")
+    parser.add_argument("--permutation-epochs", type=int, default=10)
+    parser.add_argument("--permutation-cells-per-patient", type=int, default=2000)
+    parser.add_argument("--skip-robustness", action="store_true")
+    parser.add_argument("--skip-sensitivity-suite", action="store_true")
     parser.add_argument("--seed", type=int, default=RANDOM_SEED)
     parser.add_argument("--synthetic", action="store_true", help="Run a small local smoke dataset")
     parser.add_argument("--synthetic-cells-per-patient", type=int, default=120)
@@ -1590,14 +2238,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         args.resume = True
     args.completion_mode = bool(on_kaggle and not args.full_budget)
     if args.completion_mode:
-        args.max_train_cells_per_patient = 2500
-        args.tune_cells_per_patient = 400
-        args.n_trials = 1
-        args.tune_epochs = 3
-        args.epochs = 8
+        args.max_train_cells_per_patient = 6000
+        args.tune_cells_per_patient = 1200
+        args.n_trials = 3
+        args.tune_epochs = 8
+        args.epochs = 30
         args.sequence_channels = 16
-        args.bootstrap_replicates = min(args.bootstrap_replicates, 500)
-        args.shap_cells = min(args.shap_cells, 150)
+        args.bootstrap_replicates = max(args.bootstrap_replicates, 2000)
+        args.shap_cells = min(args.shap_cells, 300)
     elif args.fast:
         args.max_train_cells_per_patient = min(args.max_train_cells_per_patient, 6000) if args.max_train_cells_per_patient > 0 else 6000
         args.tune_cells_per_patient = min(args.tune_cells_per_patient, 1000) if args.tune_cells_per_patient > 0 else 1000
@@ -1607,6 +2255,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         args.sequence_channels = max(args.sequence_channels, 16)
         args.bootstrap_replicates = min(args.bootstrap_replicates, 1000)
         args.shap_cells = min(args.shap_cells, 250)
+    args.enable_robustness = not args.skip_robustness
     # Kaggle script kernels do not provide a convenient command-line argument
     # field in kernel-metadata.json. Auto-enable the public GEO download only
     # in the Kaggle runtime; local runs remain explicit and reproducible.
@@ -1615,7 +2264,50 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     logging.basicConfig(level=getattr(logging, args.log_level), format="%(asctime)s | %(levelname)s | %(message)s")
     started = time.time()
     try:
-        run_pipeline(args)
+        primary_outdir = run_pipeline(args)
+        sensitivity_manifest = []
+        sensitivity_metric_frames = []
+        if on_kaggle and not args.skip_sensitivity_suite and not args.synthetic:
+            variants = [
+                ("gene_only_baseline", "baseline", "gene_only"),
+                ("tcr_only_baseline", "baseline", "tcr_only"),
+                ("combined_exclude_recurrence", "exclude_recurrence", "combined"),
+                ("combined_all_timepoints", "all", "combined"),
+            ]
+            for name, timepoint_mode, feature_set in variants:
+                variant = copy.deepcopy(args)
+                variant.output_dir = str(primary_outdir / "sensitivity" / name)
+                variant.timepoint_mode = timepoint_mode
+                variant.feature_set = feature_set
+                variant.models = "Transformer"
+                variant.shap_model = "Transformer"
+                variant.resume_zip = None
+                variant.resume = True
+                variant.robustness_replicates = 0
+                variant.label_permutation_retrains = 0
+                LOGGER.info(
+                    "Sensitivity run %s: timepoint_mode=%s feature_set=%s",
+                    name, timepoint_mode, feature_set,
+                )
+                result_dir = run_pipeline(variant)
+                sensitivity_manifest.append({
+                    "name": name, "timepoint_mode": timepoint_mode,
+                    "feature_set": feature_set, "models": ["Transformer"],
+                    "output_dir": str(result_dir),
+                })
+                metric_path = result_dir / "model_evaluation_metrics.csv"
+                if metric_path.exists():
+                    metric_frame = pd.read_csv(metric_path)
+                    metric_frame.insert(0, "sensitivity_analysis", name)
+                    sensitivity_metric_frames.append(metric_frame)
+                gc.collect()
+            (primary_outdir / "sensitivity_run_manifest.json").write_text(
+                json.dumps(sensitivity_manifest, indent=2), encoding="utf-8"
+            )
+            if sensitivity_metric_frames:
+                pd.concat(sensitivity_metric_frames, ignore_index=True).to_csv(
+                    primary_outdir / "sensitivity_comparison_metrics.csv", index=False
+                )
     except Exception:
         LOGGER.exception("Revision pipeline failed")
         return 1

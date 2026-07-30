@@ -31,15 +31,29 @@ This repository applies unsupervised machine learning to single-cell RNA sequenc
 **Kaggle performance and resume**
 
 The pipeline trains independent model/fold jobs in parallel. In CPU runtimes it
-uses up to four single-threaded worker processes; in GPU runtimes it uses one
+uses up to two single-threaded worker processes to avoid TensorFlow worker
+memory loss; in GPU runtimes it uses one
 worker per detected GPU. Each completed job writes an atomic checkpoint, so a
 Kaggle timeout can be resumed without repeating finished work.
 
-Because this kernel is configured without a GPU, Kaggle automatically uses a
-bounded completion budget: one tuning trial, 3 tuning epochs, 8 final epochs,
-400 tuning cells and 2,500 final-fit cells per patient, and shorter packed
-sequences for CNN/BiLSTM/Transformer. Use `--full-budget` only when running on a
-machine with enough time for the original search.
+Because this kernel is configured without a GPU, Kaggle uses a bounded expanded
+budget: 3 tuning trials, 8 tuning epochs, up to 30 final epochs with early
+stopping, 1,200 tuning cells and 6,000 final-fit cells per patient, and packed
+sequences for CNN/BiLSTM/Transformer. Use `--full-budget` only on a machine with
+enough time for the 50-epoch default.
+
+The primary baseline run now exports Transformer integrated gradients with
+signed and absolute feature effects, PC-to-gene back-projection, pathway
+attribution enrichment, modality shares, fold-level attribution stability,
+two additional initialization seeds per fold, simulated out-of-distribution
+stress tests, exact balanced patient-label permutation tests, calibration/ECE,
+five fully retrained label-permutation negative controls, decision curves,
+threshold sensitivity, patient confusion matrices,
+TCR-missingness tests, clonotype diversity summaries, and leakage audits.
+Kaggle also runs Transformer sensitivity models for baseline gene-only,
+baseline TCR-only, combined data excluding recurrence, and combined data across
+all timepoints. `--skip-robustness` or `--skip-sensitivity-suite` can disable
+these additions for debugging.
 
 The GitHub workflow extracts the completed artifacts and rebuilds a compact
 `results.zip` before pushing the kernel. A script kernel automatically resumes

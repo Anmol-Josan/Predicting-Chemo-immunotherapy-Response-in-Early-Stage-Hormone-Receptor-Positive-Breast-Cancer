@@ -32,3 +32,23 @@ Dev/
 .env
 
 Image/*.md
+
+# Large local result archives and regenerated raw/model artifacts
+/results.zip
+/results2.zip
+/results-X13-AJOSAN.zip
+/Data/
+/results/models/
+/results/checkpoints/
+/results/preprocessors/
+/results/permutation_models/
+/results/stability_models/
+/results/cell_level_predictions_*.csv.gz
+/results/sensitivity/**/cell_level_predictions_*.csv.gz
+
+# Local document-rendering and Python cache artifacts
+/_qa*/
+/_docx_figures/
+/_template_reference/
+__pycache__/
+*.pyc

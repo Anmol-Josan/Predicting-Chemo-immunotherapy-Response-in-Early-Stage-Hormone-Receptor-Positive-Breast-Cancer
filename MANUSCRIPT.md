@@ -1,1081 +1,344 @@
-[Paper.pdf](https://github.com/user-attachments/files/30398982/Paper.pdf)
-Original Paper
-Predicting Chemo-immunotherapy Response in Early-Stage Hormone
-Receptor–Positive Breast Cancer Using Multimodal Single-Cell
-Analysis: Model Development and Validation Study
-Abstract
-Background: Hormone receptor–positive (HR+) breast cancer exhibits limited and
-heterogeneous clinical benefit from immune checkpoint inhibitors. While peripheral blood
-single-cell profiling provides a minimally invasive approach to monitoring systemic
-immune dynamics, its utility in predicting treatment response remains to be fully
-established.
-Objective: This study aims to develop and evaluate a multimodal machine learning
-framework that integrates peripheral blood single-cell transcriptomes and T-cell receptor
-(TCR) encodings to predict chemo-immunotherapy response in patients with early-stage
-HR+ breast cancer.
-Methods: I analyzed the GSE300475 cohort, comprising longitudinal samples from 4
-patients (11 total samples; 100,067 cells). The feature set included principal components of
-gene expression, TCR k-mer and physicochemical encodings, and quality control covariates.
-I compared several classification algorithms, including logistic regression, tree-based
-baselines, and sequence-aware deep models, using leave-one-patient-out cross-validation
-for cell-level evaluation. Model interpretability was assessed via SHAP (SHapley Additive
-exPlanations) for tree models and gradient-based attributions for neural networks, with
-uncertainty quantified through nonparametric bootstrapping.
-Results: The multimodal models achieved high cell-level discrimination, with a peak area
-under the receiver operating characteristic curve of 0.97 and an accuracy of 91.7%.
-Transcriptomic signatures related to cytotoxicity and interferon response were the
-primary drivers of model predictions. The integration of TCR encodings provided
-complementary signals that improved model calibration. Sensitivity analyses confirmed the
-robustness of these findings to imputation and initialization variations, though the results
-remain exploratory due to the small cohort size.
-Conclusions: These proof-of-concept results suggest that combining peripheral single-cell
-multimodal profiling with interpretable machine learning can identify coherent predictive
-signatures of immunotherapy response. Future research in larger independent cohorts is
-necessary to validate these biomarkers for clinical use.
-Keywords: hormone receptor-positive breast cancer; immunotherapy; single-cell RNAseq; TCR sequencing; machine learning; biomarkers
-Introduction
-Background
-Immune checkpoint inhibitors (ICIs) have transformed cancer therapy across multiple
-tumor types [1], yet their benefit in hormone-receptor positive (HR+) breast cancer has
-been modest and inconsistent [2, 3]. Although most early-stage HR+ patients do not derive
-benefit from PD-1 pathway blockade, a clinically meaningful minority appear to gain
-durable responses when chemotherapy is combined with checkpoint blockade. This
-heterogeneity motivates the search for predictive biomarkers that can identify the patients
-most likely to benefit while minimizing unnecessary toxicity [4].
-Machine learning (ML) provides an indispensable assistance for converting highdimensional single-cell and receptor data into robust predictive models and interpretable
-biological hypotheses. Unlike classical linear statistics, modern ML, from tree-based
-ensembles (e.g., XGBoost) to deep architectures (CNNs, RNNs, and Transformer encoders),
-can capture non-linear interactions, modality-specific representations, and hierarchical
-sequence patterns relevant to antigen recognition [5–8]. In single-cell immunogenomics,
-sequence-aware deep models have been successful at extracting epitope-associated motifs
-and positional patterns from CDR3 sequences [9–13], while ensemble methods remain
-highly competitive on heterogeneous tabular summaries. Recent applications of ML in
-oncology have shown remarkable success in predicting immunotherapy response from
-imaging [14, 15], multimodal integration [16, 17], and clinical data [18, 19]. Deep generative
-models have transformed single-cell analysis by enabling denoising [20], integration [21],
-and perturbation prediction [22, 23]. This mix of approaches motivates a comparative,
-multimodal modeling strategy that both maximizes predictive power and preserves
-interpretability.
-Prior Work
-Single-cell transcriptomic atlases and spatial profiling studies have significantly advanced
-our understanding of tumor immune ecosystems [24–30]. These efforts emphasize the
-heterogeneity of immune infiltrates and the value of cellular-resolution assays for
-mechanistic insight. Complementary work has featured dynamic repertoire remodeling
-during checkpoint blockade and the clonal replacement of tumor-reactive T cells [31–33].
-Computational immunology has developed robust methods for parsing receptor
-sequence specificity and motif enrichment. GLIPH [11] introduced a pattern-matching
-algorithm for grouping TCRs with shared specificity motifs, achieving >90% precision in
-specificity group assignment across viral epitopes. TCRdist [12] proposed a distance metric
-tailored to CDR3 features and demonstrated that epitope-specific T cell receptor
-repertoires contain quantifiable, position-dependent structural signatures. NetTCR [9], a
-convolutional neural network trained on peptide–MHC binding data, achieved Area Under
-the Curve (AUC) values of 0.70–0.90 for predicting TCR–peptide interactions depending on
-the epitope, demonstrating the feasibility of sequence-level binding prediction. DeepTCR
-[10], a deep learning framework incorporating variational autoencoders and supervised
-classifiers, achieved AUC values of 0.87–0.97 for epitope classification tasks and learned
-biologically interpretable CDR3 embeddings.
-More recently, behavior-guided transcriptomics approaches have mapped T cell
-dynamics to molecular profiles through integrated sequence and expression analysis [34].
-At the intersection of multimodal prediction, recent studies demonstrate that integrating
-imaging, pathology and genomics via ML can improve clinical prediction of immunotherapy
-benefit [14, 35–38]. Comparative studies have emphasized the value of different biomarker
-modalities for checkpoint blockade response [16, 19], while pan-cancer microenvironment
-analyses have identified conserved immune subtypes that predict treatment outcomes
-[17]. The methodological literature stresses careful validation (nested cross-validation,
-patient-level splits), rigorous hyperparameter search, and interpretable attribution to
-avoid overfitting and to enable mechanistic follow-up [5, 7, 39].
-Study Objectives and Hypotheses
-Despite these advances, most high-performing predictive studies rely on tumor tissue or
-bulk assays; peripheral blood single-cell multimodal studies remain relatively scarce [24,
-40, 41]. This scarcity is an important opportunity: peripheral assays are minimally
-invasive, enable longitudinal sampling, and, when paired with modern ML, can reveal
-systemic immune dynamics that complement tumor-centric measures. Clinical trials have
-upheld the modest efficacy of ICIs in HR+ breast cancer [2, 3], creating the need for
-predictive biomarkers to identify the subset of patients who will benefit. Our study
-addresses this gap by (1) emphasizing a machine-learning-first exposition and (2)
-explicitly comparing unsupervised state discovery with supervised prediction to both
-discover coherent cell states and quantify their predictive value.
-Key findings from this study include (a) transcriptional programs indexing
-cytotoxicity, interferon response, and early T cell activation dominate the predictive signal;
-(b) TCR receptor sequence features add orthogonal, biologically plausible information
-consistent with convergent selection of tumor-reactive clonotypes; (c) algorithmic
-performance was comparable across model families, no single algorithm consistently
-dominated across feature sets; and (d) the comprehensive feature set combining gene
-expression PCs with TCR k-mer motifs and physicochemical encodings yield the strongest
-discrimination across model families.
-The remainder of the manuscript focuses on methods that prioritize ML rigor (clear
-train/validation splits, nested hyperparameter search, and interpretable attributions),
-reports quantitative performance across model families, and offers next steps required to
-translate these proof-of-concept results into clinically robust biomarkers.
-Methods
-Data source and study cohort
-This secondary analysis used the single-cell multimodal profiling dataset published by Sun and colleagues [40],
-GSE300475. The samples derive from the chemotherapy-first arm of the DFCI 16-466
-clinical trial (NCT02999477), in which early-stage, high-risk, hormone receptor positive,
-HER2 negative breast cancer patients received neoadjuvant nab-paclitaxel followed by
-combination therapy with pembrolizumab. Surgical assessment of residual cancer burden
-at the end of therapy provides the clinically adjudicated binary endpoint used in our
-modeling: responders correspond to RCB 0 or I and non-responders correspond to RCB II
-or III.
-The analytic cohort comprises four patients (PT1–PT4) who contributed peripheral
-blood at up to three longitudinal timepoints each: a pre-treatment baseline draw, a post-
-treatment timepoint collected after completion of the neoadjuvant chemo–immunotherapy
-regimen, and an optional later sample collected at clinical recurrence when available. In
-total the dataset contains 11 samples and, after quality filtering and cell calling, 100,067
-single-cell transcriptomes. Two patients (PT1, PT2) met the trial-defined responder
-endpoint (RCB 0 or I) and two (PT3, PT4) were classified as non-responders (RCB II or III).
-One sample in the collection (S8, the PT3 recurrence specimen) includes gene expression
-only and lacks paired V(D)J/TCR sequencing.
-For transparency, these 11 samples represent the realistic constraints of
-longitudinal peripheral sampling in a small proof-of-concept cohort: not every patient
-contributed all three timepoints and a minority of cells lacked productive beta-chain
-information (see Results). The baseline timepoint refers to blood drawn prior to any study
-treatment; post-treatment denotes the specimen obtained following the neoadjuvant
-therapy course (at time of surgery or scheduled on-treatment visit); and recurrence
-denotes a later, clinically ascertained event. The raw expression matrices include >20,000
-genes per cell; after feature engineering the four nested feature sets used for modeling
-range from approximately 29 to 429 features per cell (Section 3). I frame this work as
-a hypothesis-driven proof-of-concept that emphasizes biological interpretability and
-specifies validation steps required before clinical deployment.
-Single-cell capture and sequencing
-The original samples were processed with the 10x Genomics Chromium 5-prime chemistry
-to jointly profile gene expression and paired V(D)J receptor sequences [42]. Briefly, single
-cells were encapsulated with barcoded gel beads, producing cell-specific gene expression
-counts and receptor reads when chain coverage permitted. The resulting data link
-instantaneous transcriptional programs to clonotypic identity, enabling analyses that
-connect cell state and antigen-driven clonal dynamics. Table 1 summarizes the features
-extracted from the raw data, including the original features provided by the 10x Genomics
-platform.
-Table 1. Summary of Features Extracted from Single-Cell Data
-Feature Category Feature Name Description
-Original Features
-Gene Expression Matrix Raw UMI counts for
->20,000 genes per cell
-TCR Contigs CDR3 nucleotide/amino
-acid sequences, V/D/J genes
-Cell Barcodes Unique identifier for each
-single cell
-Engineered Features
-Gene PCs (1-50) Top 50 Principal
-Components of lognormalized counts
-CDR3 Length Length of the CDR3 amino
-acid sequence
-Hydrophobicity Mean hydrophobicity (KyteDoolittle scale)
-Charge Net charge of the CDR3
-sequence
-Molecular Weight Total molecular weight of
-the CDR3
-Aromaticity Fraction of aromatic
-residues (F, W, Y)
-Shannon Entropy Diversity of the TCR
-repertoire
-Clonality (1 - (Shannon Entropy /
-ln(Total Clones))
-QC Metrics Mitochondrial percentage,
-Total counts
-Data processing pipeline
-Figure 1 illustrates the comprehensive data processing workflow applied to the raw singlecell data. Starting with 100,067 cells across all patients and timepoints, I applied rigorous
-quality control filters to remove low-quality cells (cells with 10% mitochondrial content),
-resulting in high-quality cells for downstream analysis. Gene expression matrices were lognormalized (log1p transformation after library-size normalization to 104 counts) and
-scaled to unit variance. Principal component analysis (PCA) was performed on the 1,500
-most variable genes (Seurat v3 flavor), retaining the top 50 PCs. In parallel, TCR sequences
-were processed to extract productive CDR3 sequences (productive beta chains were
-detected in approximately 74% of cells), which were then encoded using three
-complementary approaches: positional one-hot encoding (padded to length 20), k-mer
-motif fingerprints (k=3, resulting in 8,000 unique 3-mers), and physicochemical property
-vectors (8 features per sequence). The final integrated feature matrix was organized into
-four nested feature families of increasing dimensionality: (1) a basic set (∼29 features: top
-20 gene PCs, 6 TCR physicochemical features, 3 QC metrics); (2) a gene-enhanced set
-(∼109 features: all 50 gene PCs, 30 SVD components, 20 UMAP dimensions, 6
-physicochemical, 3 QC); (3) a TCR-enhanced set (∼429 features: 20 gene PCs, 200 TRA and
-200 TRB k-mer motifs, 6 physicochemical, 3 QC); and (4) a comprehensive set (∼124
-features: 15 gene PCs, 50 TRA and 50 TRB k-mers, 6 physicochemical, 3 QC). This nested
-design enables systematic quantification of each modality’s marginal predictive
-contribution.
-For unsupervised analyses and visualization I computed a shared nearest-neighbor
-graph (n_neighbors=15) and used UMAP and Leiden clustering. To ensure biologically
-meaningful granularity, I swept the Leiden resolution parameter across six values (0.01,
-0.05, 0.1, 0.2, 0.5, 1.0), targeting approximately seven major clusters and selecting the
-resolution that best approximated this target. All preprocessing steps were implemented in
-standard toolchains (Scanpy workflows) with fixed random seeds and are captured in the
-analysis repository to ensure reproducibility. To maintain strict separation and prevent
-data leakage, feature scaling via StandardScaler was fit exclusively on the training partition
-of each LOPO fold. For TCR repertoire encoding, I implemented an idempotent modification
-to the vectorization pipeline to robustly handle low-diversity samples by returning zero-
-filled sparse matrices for empty vocabularies, ensuring pipeline stability across
-heterogeneous patient cohorts.
-TCR processing and clonotype assignment
-V(D)J reads were parsed to extract productive CDR3 amino acid sequences and V/J gene
-annotations. When multiple productive chains were reported in a cell I followed
-conservative pairing rules that prioritize a single dominant productive beta chain;
-ambiguous or low-confidence chain pairs were flagged and excluded from analyses that
-required unequivocal pairing. Clonotypes were defined primarily by exact productive beta
-CDR3 amino acid identity, with V gene annotations used to refine assignments when
-appropriate. I computed repertoire summary statistics at the sample and timepoint level,
-including clonality measures and Shannon entropy, to characterize global repertoire
-structure prior to supervised modeling.
-Feature engineering and sequence encodings
-Feature engineering was guided by two principles: (1) extract compact, de-noised
-summaries of high-dimensional transcriptomes that preserve coordinated biological
-programs; and (2) encode receptor sequences with multiple, complementary
-representations that balance positional specificity and generalizable biochemical
-properties. For transcriptomic features I used the leading principal components (50 PCs)
-derived from scaled expression as de-noised, orthogonal summaries of cell state. These 50
-PCs were computed from the 1,500 most highly variable genes, with the first PC explaining
-the largest share of variance and correlating strongly with T cell activation signatures.
-For receptor sequences I implemented three complementary encoding families,
-each capturing different aspects of CDR3 sequence information. The positional categorical
-encoding aligns CDR3 sequences to a fixed-length representation (padding shorter
-sequences with zero vectors and truncating longer sequences at position 20, which covers
-94.3% of sequences without truncation) and one-hot encodes residues at each position (20
-amino acids × 20 positions = 400 features), which preserves positional motifs important for
-antigen contact, particularly in the central 8-12 residue region known to dominate peptideMHC interactions. The k-mer motif encoding counts overlapping amino-acid k-mers (k=3)
-across the CDR3, producing a rotationally invariant fingerprint of short sequence motifs
-that are often enriched by convergent antigen selection; with a vocabulary 8,000 possible
-3-mers, I retained only the 500 most frequent motifs to reduce dimensionality while
-preserving 89.1% of observed k-mer diversity. The physicochemical encoding computes
-aggregated biophysical summaries across the CDR3: mean hydrophobicity (Kyte-Doolittle
-scale, range -0.5 to 1.2), net charge (sum of positive [K,R,H] minus negative [D,E] residues),
-molecular weight (sum of residue masses), aromaticity (fraction of F, W, Y residues),
-isoelectric point, instability index, aliphatic index, and length-normalized Shannon entropy
-of the amino acid composition (8 features total). These features capture binding-relevant
-tendencies that do not rely on exact residue identity and have been shown to correlate with
-peptide-MHC binding affinity in prior studies.
-Table 2 presents summary statistics for the key engineered features used in the
-modeling.
-Table 2. Statistical Summary of Key Features
-Feature Mean Std Dev Range
-Gene PC1 0.00 5.23 [-15.4, 20.1]
-Gene PC2 0.00 3.89 [-10.2, 12.5]
-CDR3 Length 14.5 2.1 [8, 24]
-Hydrophobicity 0.45 0.12 [-0,5, 1.2]
-Charge 0.15 1.5 [-3.0,4.0]
-Shannon Entropy 4.2 0.8 [2.1, 5.5]
-Table 3 summarizes the dimensionality and coverage of each encoding scheme. For
-each family I standardized feature vectors (zero mean, unit variance) on training folds
-prior to model fitting to ensure comparable feature scales across modalities.
-Table 3. TCR Encoding Schemes and Their Properties
-Encoding Type Dimensions Coverage Rationale
-Positional One-Hot 400 94.3% (no
-truncation)
-Preserves positionspecific motifs
-K-mer Fingerprint
-(k=3)
-500 89.1% of diversity Captures recurrent
-short motifs
-Physicochemical 8 100% Biochemical binding
-properties
-Combined 908 - Multimodal
-representation
-Statistical analysis and reproducibility
-Model discrimination was assessed with area under the receiver operating characteristic
-curve (AUROC) and area under the precision-recall curve (AUPRC) together with accuracy
-and F1 when appropriate. Feature importance and local attribution were estimated with
-SHAP for tree ensembles and with gradient-based saliency maps for neural-network
-models; permutation-based null tests were not implemented in this analysis. All software,
-parameters, random seeds and processed feature matrices required to reproduce the
-analyses are archived on GitHub and are available upon request.
-Modeling Strategy
-I adopted a two-stage analytic strategy that separates exploratory state discovery from
-supervised prediction. The goal of the first stage is to generate biologically interpretable
-cell state annotations and to inspect the joint distribution of gene programs and receptor
-repertoires. The goal of the second stage is to build predictive models, quantify the
-marginal value of each data modality, and provide interpretable explanations for model
-decisions. This combination of unsupervised discovery and supervised prediction
-represents a novel approach in this domain, allowing us to leverage the strengths of both
-paradigms to uncover new biological insights. Figure 2 summarizes the comprehensive
-modeling workflow, detailing the feature engineering, hyperparameter optimization, and
-validation steps.
-Unsupervised state discovery
-Unsupervised analyses are necessary to validate that the single-cell data contain coherent
-biological structure before attempting supervised learning. I used PCA for initial dimension
-reduction followed by UMAP visualization and Leiden clustering to identify
-transcriptionally coherent states. Cluster annotations were assigned by examination of
-canonical marker genes and by comparing cluster-specific expression patterns to published
-immune cell atlases [24, 25]. Silhouette scores were computed for each Leiden resolution
-to quantify cluster compactness, and the resolution yielding the highest silhouette
-coefficient was selected. In addition to Leiden clustering, I performed TCR sequence-based
-clustering using KMeans on k-mer encoded CDR3 sequences (6 clusters each for TRA and
-TRB chains) and gene expression module discovery via KMeans on gene PCs (8 modules).
-The Leiden clustering and correlation matrix can be seen in Figure 3. Table 4 summarizes
-the clustering hyperparameters.
-Table 4. Clustering Hyperparameters
-Algorithm Hyperparameter Value
-Leiden
-Resolutions tested [0.01, 0.05, 0.1, 0.2, 0.5, 1.0]
-Target clusters ~7
-Selection criterion Best silhouette score
-Neighbor graph 15 neighbors, 50 PCs
-TCR KMeans (TRA)
-n_clusters 6
-n_init 10
-TCR KMeans (TRB)
-n_clusters 6
-n_init 10
-Gene Modules
-n_clusters 8
-n_init 10
-Supervised prediction and model families
-The supervised task is binary classification mapping a single cell’s multimodal feature
- vector to the responder label defined at the patient level. I evaluated a diverse set of
-algorithms spanning linear models, tree ensembles and sequence-aware deep networks,
-representing a comprehensive comparative analysis rarely performed in single-cell
-immunotherapy biomarker studies. Tree ensembles (including XGBoost) and random
-forests were included as well-calibrated tabular baselines [5, 6], and logistic regression
-served as a transparent linear comparator. However, sequence-aware deep models were a
-primary focus because they can directly model CDR3 sequence structure and, in this run,
-produced the best cell-level discrimination. Feed-forward neural networks used as tabular
-baselines were constructed with two hidden layers (128 and 64 units) with batch
-normalization, ReLU activation, dropout (rate=0.3), and L2 regularization (λ=0.01) to
-mitigate overfitting. I report results across these families to identify which architectural
-paradigms are best suited to this data structure.
-In addition to feed-forward models I examined sequence-aware deep architectures
-tailored to receptor encodings: 1D convolutional neural networks (CNNs) on k-mer and
-positional encodings, bidirectional LSTM models on embedded amino-acid sequences, and
-Transformer encoder blocks that use positional embeddings and multi-head self-attention
-[8–10]. These sequence models were trained either on receptor-only inputs or jointly with
-transcriptomic PCs through late fusion layers (concatenation followed by dense layers).
-The goal was to assess whether sequence-native architectures capture receptor signal
-complementary to tabular summaries and whether they improve calibration or recall in
-challenging classification regions. In this analysis only the MLP underwent exhaustive inner
-cross-validated hyperparameter tuning; the CNN, BiLSTM, and Transformer were trained
-with representative, fixed configurations (reported in Table 5).
-Table 5. Sequence-aware Model Hyperparameters for Deep Learning Architectures
-Model Hyperparameter Value
-1D-CNN
-Kernel sizes 5
-Filter per layer 64
-Number of convolutional
-layers
-2
-Pooling Max
-Bi-LSTM
-Embedding dimensions 64
-Hidden units 128
-Number of layers 1
-Transformer
-Number of layers 2
-Model dimension 128
-Number of Heads 4
-Dropout 0.1
-Feed-forward dimension 256
-Hyperparameter tuning and validation
-Hyperparameter tuning was performed using grid search (or randomized search when the
-grid exceeded 15 combinations) nested within cross-validation. I used leave-one-patientout (LOPO) cross-validation as the outer evaluation loop to ensure that all cells from a heldout patient remain unseen during training. Within each training partition, inner
-hyperparameter selection was performed using GroupKFold (grouped by patient_id) when
-sufficient training patients were available, falling back to stratified 𝑘-fold when the number
-of training groups was too small. Feature scaling (StandardScaler) and imputation (mean
-imputation via SimpleImputer) were applied within a sklearn Pipeline to prevent data
-leakage between folds. For XGBoost, the search space included: learning rate (0.05, 0.1),
-maximum tree depth (3, 5), subsample fraction (0.8, 1.0), column subsample (0.8, 1.0), and
-number of trees fixed at 100, yielding 16 combinations per fold. The best performing
-XGBoost model used a learning rate of 0.1, a maximum depth of 5, and 100 estimators.
-For the Deep Learning model, I implemented a feed-forward neural network with
-two hidden layers (128 and 64 units, respectively), ReLU activation, and Batch
-Normalization. To prevent overfitting, I applied Dropout (𝜂 = 0.3) and L2 regularization (𝜆
-= 10−3 ). The model was trained using the Adam optimizer with a learning rate of 0.001,
-early stopping on validation AUC (patience = 5–8 epochs), and learning rate reduction on
-plateau (factor = 0.5, patience = 2–3, minimum lr = 10−6 ). Class weights were balanced to
-account for class imbalance.
-Final models were refit on the full training folds with best hyperparameters and
-evaluated on held-out folds. I used a leave-one-patient-out (LOPO) strategy to prevent data
-leakage at the cell level: all cells from a held-out patient were excluded from training, and
-cell-level predictions from held-out folds were aggregated across LOPO iterations to
-compute overall performance metrics.
-Table 6. Hyperparameter Optimization
-Model Hyperparameter Search Space → Best
-Logistic Regression
-C [0.1, 1, 10] → 1
-Penalty [12] → 12
-Solver [liblinear] → liblinear
-XGBoost
-Learning Rate [0.05, 0.1] → 0.1
-Max Depth [3, 5] → 5
-N Estimators [100] → 100
-Subsample [0.8, 1.0] → 0.8
-Colsample_bytree [0.8, 1.0] → 0.8
-Random Forest
-N Estimators [100] → 100
-Max Depth [10, 20] → 10
-Min Samples Split [5, 10] → 5
-Decision Tree
-Min Depth [5, 10] → 5
-Min Samples Split [5, 10] → 5
-Min Samples Leaf [2, 4] → 2
-Deep Learning
-Hidden Layers [(128,64) → (128,64)]
-Dropout Regularization [0.3] → 0.3
-L2 Regularization [10-3] → 10-3
-Learning Rate [0.001] → 0.001
-Batch Size [16] → 16
-Interpretability
-To connect model behavior to biology I employed a mix of global and local interpretability
-tools. For tree ensembles I examined feature importance by gain and used SHAP values to
-decompose predictions for individual cells and to compare modality-specific contributions.
-For linear models I inspected coefficients and for neural networks I used gradient-based
-saliency maps on the input features. I additionally performed post-hoc analyses to map
-important principal components back to gene loadings and to identify TCR k-mers and
-positional residues that correlated with positive SHAP weight.
-Results
-Cohort characteristics
-The analytic cohort comprises four patients (PT1–PT4) who contributed peripheral blood
-at up to three longitudinal timepoints: baseline (pre-treatment), post-treatment (obtained
-after completion of the neoadjuvant chemo–immunotherapy course), and recurrence
-(when clinically observed). In total the study includes 11 samples and, after standard
-quality control and cell calling, 100,067 single-cell transcriptomes. Two patients (PT1, PT2)
-were classified as responders (RCB 0 or I) and two (PT3, PT4) as non-responders (RCB II or
-III). One sample (S8, the PT3 recurrence specimen) contains gene expression only and lacks
-paired V(D)J/TCR sequencing. Across the filtered dataset productive beta-chain TCRs were
-detected in approximately 74% of cells, while roughly 21% lacked a productive beta chain
-and were handled explicitly in downstream modeling (see Methods). These numbers
-reflect both biological variation in capture efficiency and the realities of longitudinal
-peripheral sampling in a small cohort.
-Sequencing yield and quality control
-After preprocessing and QC (cells with 10% mitochondrial content removed), 100,067
-high–quality cells remained for downstream analysis. Productive beta-chain TCRs were
-detected in approximately 74% of cells; roughly 21% lacked a productive beta chain and
-were handled via missingness indicators or imputation as described in Methods.
-Feature extraction and encoding
-I extracted gene principal components, positional and k-mer TCR encodings, and
-physicochemical summaries; feature families ranged from approximately 29 to 429
-features as detailed in Methods. These nested feature families were used to quantify the
-marginal predictive contribution of each modality.
-Model Optimization and Performance
-Our analysis design aims to quantify the marginal contribution of transcriptomic and
-receptor features while making the validation constraints explicit. I trained models on four
-nested feature suites: a baseline set with common technical covariates such as percentage
-mitochondrial reads and library complexity, a gene-enhanced set that augments baseline
-covariates with the top 50 gene principal components, a TCR-enhanced set containing only
-receptor encodings, and a comprehensive set that concatenates transcriptomic and
-receptor representations.
-All primary results use leave-one-patient-out (LOPO) cross-validation to prevent
-data leakage: in each fold all cells from a held-out patient are excluded from training so that
-evaluation is performed at the cell level. I evaluated over 100 model configurations
-spanning four feature set families (basic, gene_enhanced, tcr_enhanced, comprehensive)
-and eight algorithm classes: logistic regression, decision trees, random forests, XGBoost,
-and four deep learning architectures (MLP, 1D CNN, BiLSTM, Transformer).
-To control for potential technical confounders I performed covariate checks and
-sensitivity analyses. These included removing the top principal components associated
-with batch effects and re-evaluating model performance. I also assessed feature stability by
-re-running the pipeline on different random seeds and reporting cross-fold variance across
-LOPO iterations.
-Unsupervised Analysis
-Unsupervised clustering revealed distinct cellular states within the peripheral blood
-compartment. I identified 7 major clusters using Leiden clustering, which corresponded to
-biologically distinct populations. These clusters were characterized by the expression of
-key marker genes. For instance, clusters enriched in responders showed significantly
-higher expression of cytotoxic markers (p < 0.001, Wilcoxon rank-sum test). Specifically,
-the "Cytotoxic Effector" cluster comprised 25% of cells in responders compared to only
-10% in non-responders.
-Supervised Analysis
-Across more than 100 model configurations I evaluated LOPO cell-level performance for
-representative feature–algorithm combinations. Table 7 reports the cell-level LOPO results
-for selected models; the table lists the hyperparameter setting used for each feature_set–
-algorithm pair (MLP settings were selected via inner CV; CNN, BiLSTM, and Transformer
-were trained with representative fixed configurations). Sequence-aware deep models
-provided the strongest cell-level discrimination in this run; the sequence_structure MLP
-achieved the top accuracy (0.917) and AUC (0.973). Other sequence-aware architectures
-(RNN, CNN, Transformer) showed comparable performance (accuracies in the 0.912–0.916
-range). Classical baselines (logistic regression and tree-based ensembles such as XGBoost)
-performed competitively but did not exceed the top deep models, supporting the use of
-sequence-aware representations in this dataset.
-Table 7. Cell-level classification performance under LOPO cross-validation. Ranked by F1
-score.
-Feature Set Model Accur
-acy
-Precisi
-on
-Recall F1 AUC Specifi
-city NPV
-sequence_str
-ucture
-MLP 0.917
-535
-0.860
-298
-0.927
-554
-0.892
-661
-0.973
-425
-0.9116
-59
-0.955
-468
-sequence_str
-ucture
-RNN 0.916
-246
-0.865
-808
-0.915
-308
-0.889
-870
-0.972
-390
-0.9167
-96
-0.948
-605
-comprehensi
-ve
-Transfor
-mer
-0.915
-017
-0.861
-233
-0.918
-039
-0.888
-729
-0.972
-001
-0.9132
-45
-0.949
-995
-comprehensi
-ve
-MLP 0.914
-277
-0.859
-420
-0.918
-336
-0.887
-902
-0.971
-572
-0.9118
-97
-0.950
-097
-comprehensi
-ve
-CNN 0.913
-818
-0.859
-839
-0.916
-227
-0.887
-138
-0.971
-353
-0.9124
-04
-0.948
-902
-sequence_str
-ucture CNN 0.913
-888
-0.860
-926
-0.914
-849
-0.887
-069
-0.970
-343
-0.9133
-24
-0.948
-154
-comprehensi
-ve
-BiLSTM 0.912
-948
-0.858
-890
-0.914
-822
-0.885
-974
-0.971
-396
-0.9118
-50
-0.948
-059
-sequence_str
-ucture
-Transfor
-mer
-0.912
-159
-0.859
-192
-0.911
-821
-0.884
-724
-0.969
-938
-0.9123
-57
-0.946
-356
-sequence_str
-ucture BiLSTM 0.911
-879
-0.858
-597
-0.911
-794
-0.884
-397
-0.970
-455
-0.9119
-29
-0.946
-316
-comprehensi
-ve
-RNN 0.911
-359
-0.857
-462
-0.911
-794
-0.883
-794
-0.968
-074
-0.9111
-04
-0.946
-270
-gene_enhance
-d
-Logistic
-Regressi
-on
-0.903
-000
-0.880
-000
-0.853
-000
-0.867
-000
-0.959
-000
-0.9320
-00
-0.915
-000
-basic XGBoost 0.899
-000
-0.874
-000
-0.848
-000
-0.861
-000
-0.961
-000
-0.9280
-00
-0.912
-000
-tcr_enhanced XGBoost 0.899
-000
-0.874
-000
-0.848
-000
-0.861
-000
-0.961
-000
-0.9280
-00
-0.912
-000
-gene_enhance
-d
-XGBoost 0.898
-000
-0.877
-000
-0.843
-000
-0.860
-000
-0.961
-000
-0.9300
-00
-0.910
-000
-comprehensi
-ve
-XGBoost 0.898
-000
-0.872
-000
-0.847
-000
-0.859
-000
-0.961
-000
-0.9270
-00
-0.912
-000
-basic
-Logistic
-Regressi
-on
-0.884
-000
-0.853
-000
-0.830
-000
-0.841
-000
-0.940
-000
-0.9160
-00
-0.902
-000
-tcr_enhanced MLP 0.674
-618
-0.531
-868
-1.000
-000
-0.694
-404
-1.000
-000
-0.4837
-81
-1.000
-000
-The dominant source of predictive information is coordinated transcriptomic
-programs rather than isolated single-gene effects. Mapping principal component loadings
-back to gene space and interrogating SHAP attributions revealed strong enrichment for
-canonical Cytotoxic Effectors (GZMB, PRF1, GNLY), Interferon Response genes (including
-IFIT family members and MX1), and Exhaustion Markers (such as PDCD1 and LAG3). These
-programs load heavily on the leading principal components and collectively drive the
-largest share of model attribution, indicating that the signal reflects coherent cellular states
-rather than noise or single-gene artifacts.
-Receptor-derived features supply complementary and biologically plausible
-information. Both k-mer motif fingerprints and aggregated physicochemical summaries of
-the CDR3 receive positive attribution in many folds, and motif-based analyses identify
-short sequence patterns that are recurrently enriched among clonotypes with high model
-attribution. Critically, the receptor signal is not redundant with transcriptomic programs:
-when combined with gene PCs it improves model calibration and reduces ambiguous
-classifications, particularly in cells that sit near cluster boundaries in transcriptional space.
-Unsupervised and clonotype-level analyses provide a coherent mechanistic
-narrative. Cells annotated as effector-like or early-activated by Leiden clustering are
-disproportionately predicted as coming from responders, and expanded clonotypes in
-responder samples preferentially localize to these transcriptional clusters. In the
-longitudinal samples available within the cohort I observed transient post-treatment
-expansions of effector-like clonotypes in responders, a pattern consistent with mobilization
-of tumor-reactive T cells rather than a purely homeostatic response.
-I assessed robustness through multiple sensitivity analyses. Repeating modeling
-across different random seeds, varying the missing-data strategy for receptor features, and
-removing principal components associated with technical batch effects all preserved the
-primary conclusions: the transcriptomic principal components dominate attribution,
-receptor encodings add orthogonal signal, and feature rankings are stable across
-perturbations. These checks increase confidence that the identified signatures are not
-driven by a single preprocessing choice or by idiosyncratic folds.
-There are important interpretive boundaries to emphasize. The cohort contains
-only four patients, so LOPO yields a small number of folds and reported metrics are celllevel; consequently, observed high cell-level accuracy may partly reflect within-patient
-consistency rather than guaranteed external generalizability. Missing V(D)J capture for a
-subset of cells reduces the effective sample size for receptor-aware modeling. I therefore
-position these results as a rigorous proof-of-concept that identifies plausible biological
-correlates and a clear validation path rather than as a definitive clinical claim.
-Taken together, the results provide multiple convergent lines of evidence that
-peripheral single-cell multiomic profiling, analyzed with interpretable machine learning,
-can recover biologically coherent correlates of chemo-immunotherapy response in HR
-positive breast cancer. The approach yields both predictive gain and mechanistic insight,
-and it sets the stage for independent validation and translational development of targeted,
-lower-cost assays that recapitulate the identified gene programs and receptor motifs.
-Discussion
-Principal Results
-This study demonstrates that peripheral single-cell multimodal profiling data carry meaningful
-signatures associated with chemo-immunotherapy response in early-stage HR positive
-breast cancer. The tissue-agnostic nature of peripheral monitoring, combined with singlecell resolution, can reveal the transient cellular programs and clonotypic reshaping that
-accompany effective immune engagement. Our results support three interrelated
-conclusions. First, transcriptional programs that index cytotoxicity, interferon response
-and early activation dominate the predictive signal in this cohort. Second, receptor
-sequence features add orthogonal information consistent with convergent selection of
-tumor-reactive clonotypes. Third, sequence-aware deep architectures (MLP, RNN, CNN,
-Transformer) achieved the highest cell-level discrimination in this run (top accuracy 0.917
-and AUC 0.973); tree-based baselines performed competitively but did not surpass the
-leading deep models.
-Comparison with Prior Work
-A distinguishing feature of this work is the systematic integration of unsupervised state
-discovery with supervised predictive modeling, a paradigm that is rare in single-cell
-immunotherapy biomarker research. Most studies emphasize either exploratory clustering
-[24–26] or end-to-end supervised prediction [35, 38], but seldom combine both
-approaches within a unified framework. By explicitly comparing both learning paradigms, I
-achieve dual objectives: (1) biologically interpretable cell state annotations that ground the
-predictive features in known immune biology, and (2) quantitative discrimination metrics
-that validate the clinical relevance of those states. This methodological synthesis enables
-mechanistic hypothesis generation while maintaining rigorous predictive performance,
-offering a template for future single-cell biomarker studies.
-Furthermore, the comprehensive comparative analysis across multiple model
-families, from linear regression baselines to gradient-boosted ensembles, feed-forward
-neural networks, and sequence-aware architectures (CNNs, LSTMs, Transformers),
-provides rare empirical evidence about which algorithmic paradigms are best suited to
-multimodal single-cell data. The explicit evaluation of three complementary TCR encoding
-schemes (positional, k-mer, physicochemical) and their integration with transcriptomic
-PCs represents a level of technical depth uncommon in applied immunotherapy prediction
-studies, demonstrating that thoughtful feature engineering can match or exceed the
-benefits of end-to-end learned representations when training data are limited.
-A key advantage of our approach is the reliance on peripheral blood rather than
-tumor tissue. Tissue biopsies are invasive, difficult to repeat longitudinally, and often fail to
-capture the systemic immune dynamics that are critical for immunotherapy response. By
-demonstrating that peripheral blood mononuclear cells (PBMCs) harbor predictive signals,
-I offer insight into the potential for non-invasive, serial monitoring of patient response.
-This is particularly relevant for early-stage disease, where "liquid biopsies" could guide
-treatment de-escalation or intensification without the morbidity of repeated surgeries.
-Our work distinguishes itself from previous studies by integrating unsupervised
-state discovery with supervised predictive modeling. While prior efforts have largely
-focused on either descriptive clustering or black-box prediction, our pipeline combines
-these paradigms to yield interpretable, biologically grounded predictors. Unlike studies
-that rely solely on bulk sequencing or single-modality data, our multimodal approach
-leverages the synergy between gene expression and receptor sequences to resolve subtle
-cell states that drive response. This dual focus on novelty in both biological insight and
-methodological rigor positions our findings as a significant advance in the field of
-computational immuno-oncology.
-Compared to recent studies in the field, our approach offers a complementary
-perspective. Bassez et al. [24] profiled tumor-infiltrating lymphocytes at single-cell
-resolution and identified pre-treatment T cell states predictive of anti-PD-1 response, but
-their analysis was restricted to tissue biopsies and did not integrate TCR sequence
-information. Wu et al. [25] characterized the breast cancer immune landscape using paired
-single-cell RNA and TCR sequencing from tumor tissue, revealing clonotype dynamics
-across subtypes. Vanguri et al. [35] achieved an AUC of 0.80 for immunotherapy response
-prediction in non-small cell lung cancer by integrating radiology, pathology, and genomic
-features, but relied on bulk-level modalities. Our peripheral blood approach operates in a
-fundamentally different compartment, demonstrating that PBMCs harbor cell-level
-predictive signals without requiring invasive tissue sampling. This finding suggests that
-peripheral and tissue-based approaches may capture complementary aspects of the antitumor immune response.
-Limitations
-Several limitations warrant explicit acknowledgment. First, the cohort consists of only four
-patients (two responders, two non-responders), drawn from a single clinical trial (DFCI 16-
-466, NCT02999477). The small cohort size severely constrains the model’s ability to learn
-inter-patient variation and means high cell-level accuracy may reflect strong within-patient
-transcriptional consistency rather than guaranteed external generalizability. Second,
-pseudobulk differential expression analysis between response groups identified no
-statistically significant genes (all FDR > 0.79), and k-mer enrichment analysis across 6,093
-k-mers similarly yielded no significant associations (all FDR = 1.0). These null results in
-aggregated analyses further underscore the limited statistical power of the current small
-cohort. Third, one sample (S8) lacked TCR sequencing data, reducing the effective sample
-for receptor-aware analyses. Fourth, the archived results were generated from a processing
-pipeline that differed from the current notebook implementation, introducing potential
-inconsistencies in reported numbers. These limitations collectively indicate that our results
-represent a proof-of-concept demonstration requiring independent validation in larger,
-multi-center cohorts before any clinical application.
-Conclusions
-Several important research directions emerge from this work that would strengthen
-clinical translation and biological understanding. First, validation in larger, independent
-cohorts with prospective collection protocols is essential to confirm the generalizability of
-the identified signatures across diverse patient populations and treatment regimens. The
-current cohort size (four patients) limits power for fully stratified patient-level analyses
-and adjustment for potential clinical confounders such as tumor burden, prior treatment
-history, and comorbidities.
-Second, expanding the multimodal feature space could enhance both predictive
-accuracy and mechanistic insight. Integrating surface protein expression via CITE-seq
-would provide direct measurement of activation and exhaustion markers without relying
-on transcriptional proxies. Similarly, chromatin accessibility profiling (scATAC-seq) could
-reveal epigenetic states that govern T cell differentiation and dysfunction. Spatial
-transcriptomics of paired tumor samples, when available, would enable direct comparison
-of peripheral and intratumoral immune landscapes and help identify whether peripheral
-signals reflect systemic priming or spillover from tissue-resident populations.
-Third, longitudinal sampling throughout the treatment course would enable
-development of dynamic biomarkers that track evolving immune responses. Early on-
-treatment changes in effector programs or clonal expansions may provide earlier readouts
-of therapeutic efficacy than anatomic imaging, potentially enabling adaptive treatment
-strategies. Machine learning models that incorporate temporal trajectories, such as
-recurrent neural networks or state-space models, could capture these dynamics more
-effectively than static snapshots.
-Fourth, mechanistic validation through functional assays and perturbation
-experiments would strengthen causal claims. Ex vivo stimulation of isolated clonotypes
-identified as predictive by the model, coupled with cytokine profiling or killing assays
-against patient-derived tumor organoids [43], would directly test whether these cells
-possess tumor-reactive function. CRISPR screens targeting genes with high feature
-importance could 14 identify causal drivers of the effector programs that correlate with
-response.
-Finally, development of reduced, cost-effective assays that recapitulate the key
-predictive features is critical for clinical deployment. Targeted gene expression panels (e.g.,
-NanoString or RT-qPCR) focusing on the top 20-50 genes with highest SHAP attribution,
-combined with targeted TCR sequencing of the most predictive k-mer motifs, could provide
-a practical alternative to full single-cell profiling. Validating such simplified assays in
-prospective trials would represent a major step toward routine clinical use. From a
-translational perspective the findings are encouraging. If validated, peripheral single-cell
-assays interpreted with robust machine learning could provide a minimally invasive
-biomarker to identify HR positive patients most likely to benefit from combined chemoimmunotherapy. Such biomarkers would have direct clinical impact by personalizing
-treatment decisions, reducing unnecessary toxicity, and improving cost-effectiveness.
-Practically, any clinical deployment would likely rely on lower-cost targeted assays that
-recapitulate the identified gene programs and receptor motifs rather than full single-cell
-sequencing.
-I conclude with methodological guidance. For small cohorts, prefer robust,
-interpretable models with careful control for batch and patient identity. Use sequenceaware encodings that mix positional and physicochemical information rather than relying
-solely on raw one-hot inputs. Quantify uncertainty via repeated subsampling and report
-cell-level performance measures. Finally, publish code and intermediate data
-representations to accelerate community validation.
-Acknowledgements
-I thank Sun et al. for making the GSE300475 dataset publicly available and the patients and
-clinical teams who contributed samples. The author thanks colleagues who provided
-feedback on analysis and interpretation as well as his research mentor, Dr. Morteza
-Sarmadi. Processed feature matrices, notebooks, and code required to reproduce the
-analyses are archived in GitHub and are available upon request.
-Conflicts of Interest
-The authors declare no competing interests.
-Abbreviations
-HR+: hormone receptor positive
-ICI: immune checkpoint inhibitor
-LOPO: leave-one-patient-out cross–validation
+# Original Paper
+
+# Baseline Peripheral Blood Single-Cell Multimodal Profiling for Chemoimmunotherapy Response in Early-Stage Hormone Receptor-Positive Breast Cancer: Exploratory Model Development Study
+
+Anmol Singh Josan
+
+Eastside Preparatory School, 10613 NE 38th Place, Kirkland, WA 98033, United States
+
+Corresponding author: Anmol Singh Josan, Eastside Preparatory School, 10613 NE 38th Place, Kirkland, WA 98033, United States
+
+## Abstract
+
+**Background:** Immune checkpoint inhibition is entering the treatment landscape for high-risk estrogen receptor-positive, human epidermal growth factor receptor 2-negative breast cancer, but response remains heterogeneous. Peripheral blood single-cell profiling may support minimally invasive biomarker discovery. Because treatment outcome is assigned to patients, analyses that treat thousands of cells as independent outcomes can severely overstate evidence.
+
+**Objective:** This study evaluated an exploratory, leakage-controlled machine learning framework that combines baseline peripheral blood gene expression and T-cell receptor (TCR) features while treating the patient as the clinically relevant evaluation unit.
+
+**Methods:** This retrospective secondary analysis used public single-cell RNA sequencing and paired TCR data from GSE300475. The primary analysis included 39,532 pretreatment cells from 4 patients (2 responders and 2 nonresponders). In each outer leave-one-patient-out fold, highly variable gene selection, scaling, principal component analysis (PCA), and TCR 3-mer vocabulary construction were fitted only with training patients; uniform manifold approximation and projection coordinates were excluded. Multilayer perceptron (MLP), 1-dimensional convolutional neural network (CNN), bidirectional long short-term memory network (BiLSTM), Transformer, and XGBoost models were tuned with inner patient-grouped cross-validation. Cell probabilities were averaged within each held-out patient. Confidence intervals (CIs) resampled whole patient clusters. Baseline transcriptome-only and TCR-only analyses, longitudinal sensitivity analyses, patient-label permutation tests, seed stability, and out-of-distribution perturbations were evaluated.
+
+**Results:** All 4 neural architectures correctly separated the 4 held-out patients; patient-level area under the receiver operating characteristic curve (AUROC) and accuracy were 1.00. Pooled cell-level AUROC ranged from 0.996 (95% patient-clustered bootstrap CI 0.990-0.999) for the Transformer to 1.000 (95% CI 1.000-1.000) for the MLP. These values do not establish validation: only 6 balanced patient-label assignments were possible, giving a minimum attainable exact one-sided P value of .167. A retrained Transformer permutation control with 5 shuffled assignments gave P=.33. Baseline transcriptome-only Transformer AUROC was 1.00 at both cell and patient levels, whereas TCR-only AUROC was 0.00. The first 50 training-fold PCs explained 30.4%-31.3% of variance. Gene-PC ablation reversed all 4 patient classifications, while TCR-feature ablation caused no patient-label changes.
+
+**Conclusions:** Baseline peripheral blood single-cell multimodal features contained a separable signal in this 4-patient cohort, but the evidence is hypothesis generating and cannot support clinical prediction claims. The primary contribution is a reproducible framework for leakage-controlled preprocessing, nested patient-grouped evaluation, explicit outcome aggregation, and patient-clustered uncertainty. Larger prospectively collected cohorts and external validation are required.
+
+**Keywords:** breast cancer; immunotherapy; single-cell RNA sequencing; T-cell receptor; machine learning; leave-one-patient-out cross-validation; biomarkers
+
+# Introduction
+
+## Background
+
+Hormone receptor-positive, human epidermal growth factor receptor 2-negative breast cancer is biologically heterogeneous and has historically been less responsive to immune checkpoint inhibition than triple-negative disease. Recent phase 3 studies nevertheless showed that adding programmed cell death protein 1 blockade to neoadjuvant chemotherapy can increase pathologic complete response in selected patients with high-risk estrogen receptor-positive disease [1,2]. These results intensify the need for biomarkers that identify patients most likely to benefit while limiting unnecessary toxicity.
+
+Peripheral blood is attractive for longitudinal immune monitoring because it can be sampled repeatedly with less burden than tumor tissue. Single-cell RNA sequencing resolves transcriptional states that are obscured in bulk measurements, and paired V(D)J sequencing adds information about T-cell receptor sequence, clonal expansion, and repertoire structure [3-7]. The source study by Sun et al characterized dynamic systemic immune responses during chemoimmunotherapy in early-stage hormone receptor-positive breast cancer and released the cell-level data through the Gene Expression Omnibus [3]. The present work retains the original study motivation—linking peripheral immune state, cytotoxicity, interferon signaling, and TCR structure to therapeutic response—but narrows the predictive claim to pretreatment samples and the independent patient unit.
+
+## Single-Cell and TCR Representation
+
+Gene-expression profiles and TCR sequences describe related but distinct aspects of lymphocyte biology. Expression profiles reflect cell state, activation, differentiation, and technical variation. TCR complementarity-determining region 3 sequences encode antigen-recognition structure and can be represented through chain presence, sequence length, amino-acid composition, physicochemical summaries, and position-independent k-mer motifs [8-11]. DeepTCR and related neural approaches have shown that repertoire sequence concepts can be learned from high-dimensional TCR data [11]. However, missing V(D)J libraries, nonproductive chains, and sample-level repertoire properties can also reveal sample identity. These technical signals must therefore be modeled explicitly and interpreted cautiously.
+
+Single-cell observations are nested within people. Cells from the same patient share outcome, genetics, treatment exposure, processing history, and immune environment; they are subsamples rather than independent outcome observations [12,13]. This distinction is critical in the current cohort because tens of thousands of cells arise from only 4 patients. Cell-level prediction remains useful for forming a patient score, but statistical evidence must be summarized and resampled at the patient level.
+
+## Machine Learning and Study Objective
+
+Machine learning provides a useful framework for combining nonlinear transcriptomic and receptor-sequence representations. MLPs learn interactions among tabular features; 1-dimensional CNNs detect local feature patterns; BiLSTMs model ordered dependencies; Transformers use self-attention; and gradient-boosted trees provide a nonneural comparator [14-18]. In very small cohorts, these architectures can overfit patient identity even when the number of cells is large. Nested grouped validation, regularization, negative controls, calibration measures, and transparent loss histories are therefore necessary, although none can replace external validation [19-22].
+
+The objective was to revise the original exploratory analysis around 4 principles: pretreatment prediction as the primary question; all feature construction confined to outer training patients; the same inner grouped tuning framework applied to every architecture; and patient-level evaluation reported alongside descriptive cell-level performance. Secondary objectives were to quantify TCR missingness, compare transcriptome-only and TCR-only information, examine longitudinal sensitivity, test seed and label stability, and map model attributions through PCA loadings to genes and pathways.
+
+# Methods
+
+## Data Source and Study Cohort
+
+This was a retrospective secondary analysis of deidentified data made public by Sun et al [3] under Gene Expression Omnibus accession GSE300475. No participants were recruited for this analysis. The source dataset contains 11 peripheral blood samples and 100,067 cells from 4 patients with high-risk hormone receptor-positive, human epidermal growth factor receptor 2-negative breast cancer. Two patients met the source study responder definition of residual cancer burden class 0 or I at surgery, and 2 were nonresponders with residual cancer burden class II or III. Residual cancer burden provides a standardized quantitative measure of residual disease after neoadjuvant therapy [23].
+
+The primary predictive cohort was restricted to one baseline sample per patient, before treatment-associated or recurrence-associated immune states could enter the predictors. It contained 39,532 cells: 17,654 from responders and 21,878 from nonresponders. Longitudinal sensitivity analyses used all 100,067 cells or excluded the recurrence samples while retaining baseline and on-treatment samples. Sample S8, the recurrence specimen from Patient 3, contained gene expression but no paired V(D)J library. These data are described as single-cell multimodal profiling because transcript abundance and paired receptor sequencing are measured from linked cells; they are not separate biological omes.
+
+Table 1. Baseline cohort and productive T-cell receptor coverage.
+
+| Patient | Outcome | Baseline cells | Productive alpha chain, % | Productive beta chain, % | Any productive chain, % |
+|---|---|---:|---:|---:|---:|
+| Patient 1 | Responder | 8931 | 44.9 | 52.7 | 54.5 |
+| Patient 2 | Responder | 8723 | 28.3 | 33.9 | 35.4 |
+| Patient 3 | Nonresponder | 10398 | 51.1 | 55.0 | 56.4 |
+| Patient 4 | Nonresponder | 11480 | 43.9 | 48.9 | 50.5 |
+
+## Timepoint Stratification and TCR Missingness
+
+The executable exposes baseline, all-timepoint, and recurrence-excluded switches. Baseline was prespecified as primary because only pretreatment observations can support a prospective response-prediction interpretation. Analyses containing on-treatment or recurrence cells were treated as sensitivity analyses of longitudinal immune-state classification, not as validation of pretreatment prediction.
+
+For each alpha and beta chain, missingness indicators were included explicitly. Absent sequence-derived values were zero-filled after the training-fold transformation was defined. K-mer vocabularies were learned only from productive sequences in the outer training patients; unseen test-patient k-mers mapped to zero. This approach retained cells without productive receptors and allowed the V(D)J-missing recurrence sample to enter the all-timepoint sensitivity analysis without inventing receptor sequences. Productive-chain prevalence was summarized by patient, response, and timepoint. Cell-level Fisher tests were exported as descriptive diagnostics but were not interpreted as patient-level hypothesis tests because the cells are clustered.
+
+## Leakage-Controlled Feature Engineering
+
+All supervised preprocessing occurred separately inside each outer fold. Training patients alone determined gene filtering, highly variable gene ranking, means and variances for standardization, PCA loadings, and TCR vocabulary. The held-out patient was transformed with those fixed objects. No UMAP coordinate, Leiden cluster label, full-dataset embedding, or outcome-informed global feature selection was used as a predictor. This organization follows the principle that every data-adaptive operation must be nested within model assessment [19,20].
+
+Gene counts were library-size normalized, log transformed, filtered to variable genes in the training partition, standardized, and projected with incremental PCA following established single-cell analysis principles [36,37]. The original 50-component representation was retained as a regularizing feature budget so its behavior could be compared with the prior analysis. Cumulative explained variance was computed in every outer training set. Because 50 PCs did not reach an 80% target, the manuscript reports the achieved variance rather than claiming comprehensive retention. The code also supports selection of the smallest component count reaching a prespecified variance threshold, subject to a documented cap [38].
+
+TCR features included chain-presence indicators, sequence lengths, amino-acid composition and physicochemical summaries, and position-independent 3-mer counts for alpha and beta chains. Sample-level repertoire diversity values were not used as cell-intrinsic predictors in the revised primary feature matrix because they could encode sample identity. Gene and receptor matrices were standardized with training-fold statistics before concatenation.
+
+## Outer Leave-One-Patient-Out Cross-Validation
+
+The outer loop used leave-one-patient-out cross-validation (LOPO-CV), producing exactly one held-out prediction set for each patient. At no point were cells from the held-out patient used for fitting preprocessing, selecting hyperparameters, early stopping, or training the corresponding final model. The models generated a response probability for every held-out cell; the clinically relevant patient probability was the arithmetic mean over all cells from that held-out patient. Sample probabilities were calculated similarly for longitudinal analyses.
+
+The MLP used dense layers, dropout, L2 regularization, and early stopping. The CNN applied 1-dimensional filters to a channelized feature sequence. The BiLSTM processed the same channelized representation bidirectionally. The Transformer used multihead self-attention followed by a regularized classification head. XGBoost supplied a tree-ensemble comparison [14-18]. Neural models minimized binary cross-entropy with Adam. Class weights were derived only from outer-training data.
+
+## Inner Patient-Grouped Hyperparameter Tuning
+
+Optuna optimization was applied to all 5 architectures within each outer fold [24]. Inner GroupKFold partitions were grouped by patient identifier, leaving 3 patients available for tuning in each outer fold. The objective was mean validation log loss across the grouped inner splits. Tuned quantities included learning rate, batch size, dropout, final-layer width, and early-stopping patience for all neural networks; hidden-layer width and L2 penalty for the MLP; filter number and kernel size for the CNN; recurrent width for the BiLSTM; embedding width and attention-head number for the Transformer; and estimator count, tree depth, learning rate, row and column subsampling, and L2 regularization for XGBoost.
+
+The supplied archive was generated in completion mode with 3 Optuna trials per architecture, 8 tuning epochs, and up to 30 final epochs. This is computationally broader and fairer than tuning only the MLP, but it remains a limited search. The revised script defaults to 12 trials and supports larger user-specified budgets. Audit of the archive also identified an inappropriately low XGBoost learning-rate range and duplicated training/validation loss traces. The code now uses a tree-appropriate learning-rate range of 0.01-0.20 and records separate evaluation sets. The archived XGBoost result is reported as a failed comparator run and should be replaced by a full corrected rerun before making architecture-ranking claims.
+
+## Outcome Aggregation and Statistical Analysis
+
+Fold-level cell metrics included AUROC, accuracy, precision, recall, specificity, F1 score, Brier score, and log loss [25,26]. Metrics were then calculated on pooled out-of-fold cell predictions and on mean probabilities for each held-out patient. Patient and sample predictions were exported explicitly. Accuracy-related measures used a probability threshold of 0.50.
+
+Ninety-five percent percentile CIs were estimated with 2000 bootstrap replicates. Whole patients—not individual cells—were resampled. For cell-level metrics, every cell belonging to a selected patient was retained together. For sample-level longitudinal metrics, all samples from a selected patient remained in the same bootstrap cluster. This preserves the requested metric level while respecting the hierarchy of cells within samples and patients [12,27]. With only 4 clusters, bootstrap intervals are discrete and can be degenerate, especially when every patient is classified correctly.
+
+An exact negative control enumerated all 6 balanced assignments of 2 responder labels among 4 patients. A stronger computational control retrained the selected Transformer under 5 balanced shuffled assignments. The observed statistic was compared with the null distribution using a one-sided empirical P value. Three independent Transformer seeds evaluated optimization stability. Out-of-distribution stress tests added Gaussian noise, randomly masked features, or ablated the complete gene-PC or TCR block.
+
+## Model Interpretability
+
+The revised code uses SHAP Explainer for XGBoost and DeepExplainer for compatible neural models, with integrated gradients as a documented neural fallback [28,29]. The supplied archive used integrated gradients for the selected Transformer. Absolute feature attributions were summarized across held-out cells and folds. For gene-expression PCs, an attribution was back-projected by multiplying the absolute PC attribution by the absolute fold-specific loading for each gene and then averaging across folds. Signed back-projection was retained separately because a PC combines many correlated loadings and should not be interpreted as a causal gene effect.
+
+Pathway summaries used prespecified cytotoxic-effector, interferon-response, T-cell activation, exhaustion/checkpoint, memory/naive, and mitochondrial gene sets. Empirical enrichment compared each set's mean attribution with random gene sets of equal size. These analyses evaluate concentration of model attribution, not differential expression, causal mechanism, or independent patient-level association.
+
+## Software and Reproducibility
+
+The archived run used Python 3.12.13, NumPy 2.0.2, pandas 2.3.3, scikit-learn 1.6.1 [35], XGBoost 3.2.0, TensorFlow 2.20.0, SHAP 0.51.0, and Optuna 4.9.0. The fixed random seed was 93768. The executable exports cell-, sample-, patient-, fold-, and pooled metrics; clustered CIs; hyperparameters; preprocessing objects; PCA variance; loss curves; attribution summaries; sensitivity analyses; robustness controls; and software metadata. Standalone figures are saved without embedded titles or captions at 600 dots per inch. Reporting was aligned with the emphasis of TRIPOD+AI on transparent clinical prediction-model methods and limitations [30].
+
+## Ethics Considerations
+
+This work was a secondary computational analysis of public, deidentified data. No new participant contact, intervention, recruitment, or collection occurred. Ethical oversight and consent for the original clinical study are described by Sun et al [3].
+
+# Results
+
+## Cohort and TCR Coverage
+
+The baseline cohort contained 39,532 cells, with 8931-11,480 cells per patient (Table 1). A productive alpha or beta chain was observed in 35.4%-56.4% of cells across patients. At baseline, 45.0% of responder cells and 53.3% of nonresponder cells contained at least one productive chain. These are descriptive cell fractions rather than independent group estimates. The all-timepoint cohort contained the original 100,067 cells across 11 samples; the recurrence sample S8 contributed 12,832 gene-expression profiles with both receptor chains coded as missing.
+
+## Training-Fold PCA Variance
+
+The first 50 training-derived PCs explained 31.30%, 30.99%, 30.36%, and 30.81% of gene-expression variance when Patients 1-4, respectively, were held out (Figure 1). The representation therefore retained approximately one-third of the training-fold variance and did not meet an 80% threshold. This makes the 50-component choice a fixed regularization budget, not a statistically complete representation.
+
+Figure 1. Cumulative explained gene-expression variance across principal components fitted independently within each outer training fold. The dashed line marks the 80% target.
+
+## Cell- and Patient-Level Model Performance
+
+The neural models produced high pooled cell-level discrimination, with AUROCs from 0.996 to 1.000 and patient-clustered CIs shown in Table 2. Patient aggregation yielded the same ordering for every neural architecture: the mean probabilities of both responders exceeded 0.50 and those of both nonresponders were below 0.50 (Table 3 and Figure 2). Thus, neural patient-level AUROC and accuracy were 1.00. The MLP had the lowest pooled cell Brier score (0.00047), while the Transformer Brier score was 0.0229. The archived XGBoost run reversed the patient ordering and had AUROC and accuracy of 0.00; because its learning-rate search was defective, it cannot support a fair architecture comparison.
+
+Table 2. Pooled out-of-fold performance with patient-clustered 95% confidence intervals.
+
+| Model | Evaluation level | AUROC (95% CI) | Accuracy (95% CI) | Brier score (95% CI) |
+|---|---|---|---|---|
+| Multilayer perceptron | Cell | 1.000 (1.000-1.000) | 0.999 (0.999-1.000) | 0.0005 (0.0002-0.0008) |
+| Convolutional neural network | Cell | 1.000 (0.999-1.000) | 0.992 (0.983-0.998) | 0.0096 (0.0015-0.0180) |
+| Bidirectional long short-term memory network | Cell | 0.997 (0.995-1.000) | 0.979 (0.965-0.998) | 0.0169 (0.0025-0.0285) |
+| Transformer | Cell | 0.996 (0.990-0.999) | 0.972 (0.951-0.991) | 0.0229 (0.0072-0.0421) |
+| XGBoost, archived defective search | Cell | 0.000 (0.000-0.000) | 0.000 (0.000-0.000) | 0.4178 (0.4058-0.4290) |
+| Multilayer perceptron | Patient | 1.000 (1.000-1.000) | 1.000 (1.000-1.000) | 0.000002 (0.000000-0.000004) |
+| Convolutional neural network | Patient | 1.000 (1.000-1.000) | 1.000 (1.000-1.000) | 0.0033 (0.0001-0.0068) |
+| Bidirectional long short-term memory network | Patient | 1.000 (1.000-1.000) | 1.000 (1.000-1.000) | 0.0012 (0.0001-0.0023) |
+| Transformer | Patient | 1.000 (1.000-1.000) | 1.000 (1.000-1.000) | 0.0014 (0.0001-0.0029) |
+| XGBoost, archived defective search | Patient | 0.000 (0.000-0.000) | 0.000 (0.000-0.000) | 0.4183 (0.4057-0.4292) |
+
+Table 3. Mean response probabilities for each held-out patient.
+
+| Model | Patient 1, responder | Patient 2, responder | Patient 3, nonresponder | Patient 4, nonresponder |
+|---|---:|---:|---:|---:|
+| Multilayer perceptron | 1.000 | 1.000 | 0.002 | 0.001 |
+| Convolutional neural network | 0.989 | 0.905 | 0.064 | 0.005 |
+| Bidirectional long short-term memory network | 0.990 | 0.986 | 0.051 | 0.044 |
+| Transformer | 0.955 | 0.988 | 0.056 | 0.010 |
+| XGBoost, archived defective search | 0.359 | 0.343 | 0.653 | 0.636 |
+
+Figure 2. Mean response probability across cells for each held-out patient. Orange bars denote responders, green bars denote nonresponders, and the dashed line marks the 0.50 classification threshold.
+
+The apparently perfect neural patient metrics represent only 4 predictions. Every valid two-class bootstrap resample preserved their ordering, so the patient-level CIs were degenerate at 1.00. Exact enumeration of the 6 balanced patient-label assignments yielded a minimum attainable one-sided P value of .167. When the Transformer was retrained under 5 shuffled balanced assignments, 1 shuffled assignment also achieved AUROC 1.00, producing an empirical P value of .33. Accordingly, the observed separation was not statistically distinguishable from the patient-label null at P<.05.
+
+## Sensitivity and Robustness Analyses
+
+The baseline transcriptome-only Transformer retained cell-level AUROC 1.000 (95% CI 1.000-1.000) and patient-level AUROC 1.00. In contrast, the TCR-only Transformer reversed the cell and patient ordering (AUROC 0.00). Adding receptor features did not improve discrimination over the transcriptome-only representation in this cohort. Longitudinal combined-feature analyses also separated the 4 patients, whether recurrence samples were excluded or all 11 samples were included (Table 4), but these analyses classify observations collected after treatment and cannot be interpreted as prospective baseline prediction.
+
+Table 4. Transformer sensitivity analyses.
+
+| Analysis | Cells | Cell AUROC (95% CI) | Cell accuracy | Patient AUROC | Patient accuracy |
+|---|---:|---|---:|---:|---:|
+| Baseline transcriptome only | 39532 | 1.000 (1.000-1.000) | 0.997 | 1.000 | 1.000 |
+| Baseline T-cell receptor only | 39532 | 0.000 (0.000-0.000) | 0.011 | 0.000 | 0.000 |
+| Baseline and on-treatment combined | 70547 | 0.999 (0.998-1.000) | 0.988 | 1.000 | 1.000 |
+| All timepoints combined | 100067 | 0.999 (0.999-1.000) | 0.991 | 1.000 | 1.000 |
+
+Across 3 seeds, the Transformer patient-level AUROC and accuracy remained 1.00. Mean probabilities ranged from 0.928 to 0.971 for Patient 1, 0.953 to 0.988 for Patient 2, 0.043 to 0.063 for Patient 3, and 0.010 to 0.031 for Patient 4. Stability across 3 optimization seeds is reassuring only within this dataset and does not address sampling uncertainty across patients.
+
+Gaussian noise at standard deviations from 0.05 to 0.20 caused no patient-label changes. Random masking of 50% of features changed 2 labels and reduced patient AUROC to 0.75 and accuracy to 0.50. Ablating all TCR features changed mean patient probabilities by 0.012 and caused no label changes. Ablating all gene PCs changed probabilities by 0.959 on average, reversed all 4 labels, and reduced patient AUROC and accuracy to 0.00. These perturbations reinforce the conclusion that transcriptomic components, not TCR features, drove the archived Transformer.
+
+## Loss Curves and Overfitting Assessment
+
+Figures 3-6 display training and validation binary cross-entropy across the 8 tuning epochs for the neural architectures. Mean training and validation losses generally declined together during this short horizon; fold ranges were broad, reflecting only 3 training patients per outer fold. The curves do not show a sustained widening gap over 8 epochs, but neither the short traces nor early stopping can demonstrate absence of overfitting at an effective sample size of 4. The archived XGBoost curve is shown separately (Figure 7); its original implementation duplicated the validation series rather than recording a distinct training evaluation set. The revised code corrects this logging defect.
+
+Figure 3. Multilayer perceptron training and validation binary cross-entropy across patient-grouped inner validation folds.
+
+Figure 4. Convolutional neural network training and validation binary cross-entropy across patient-grouped inner validation folds.
+
+Figure 5. Bidirectional long short-term memory network training and validation binary cross-entropy across patient-grouped inner validation folds.
+
+Figure 6. Transformer training and validation binary cross-entropy across patient-grouped inner validation folds.
+
+Figure 7. Archived XGBoost evaluation-loss trace. The corrected executable records distinct training and validation log-loss series in future runs.
+
+## Model Attribution and Gene-Loading Mapping
+
+The archived selected-Transformer attribution summary was led by gene-expression principal components 4, 3, 7, 1, and 2, with several alpha- and beta-chain physicochemical summaries also appearing among the 25 largest features (Figure 8). Fold-specific modality fractions were variable: the gene-expression block accounted for 45.9%-86.8% of absolute attribution across folds. Pairwise fold attribution correlations were modest (Spearman 0.32-0.47), and top-25 gene overlap ranged from 0.56 to 0.72, emphasizing uncertainty in the ranking.
+
+Back-projection through PCA loadings ranked CD14, CLIC3, S100A12, MT-CO2, MATK, CCL4, MS4A6A, IL2RB, FGFBP2, KLRF1, KLRG1, and GZMH among the leading genes. Prespecified attribution enrichment was strongest for mitochondrial, cytotoxic-effector, memory/naive, and T-cell activation sets; interferon-response attribution was also above its random-set null, whereas the exhaustion/checkpoint set had no mapped attribution (Table 5). These empirical values quantify where this fitted model concentrated attribution and are not patient-level biological association P values.
+
+Table 5. Selected gene and pathway attribution results from the Transformer.
+
+| Result type | Gene or pathway | Attribution summary | Empirical comparison |
+|---|---|---:|---:|
+| Gene | CD14 | 0.1154 | Not applicable |
+| Gene | CLIC3 | 0.1151 | Not applicable |
+| Gene | S100A12 | 0.1146 | Not applicable |
+| Gene | MATK | 0.1119 | Not applicable |
+| Gene | CCL4 | 0.1105 | Not applicable |
+| Gene | IL2RB | 0.1060 | Not applicable |
+| Gene | FGFBP2 | 0.1035 | Not applicable |
+| Gene | GZMH | 0.0966 | Not applicable |
+| Pathway | Cytotoxic effector | 34.57-fold enrichment | P=.0005 |
+| Pathway | Interferon response | 6.55-fold enrichment | P=.003 |
+| Pathway | T-cell activation | 25.35-fold enrichment | P=.0005 |
+| Pathway | Memory and naive T-cell state | 28.51-fold enrichment | P=.0005 |
+| Pathway | Mitochondrial genes | 39.82-fold enrichment | P=.0005 |
+| Pathway | Exhaustion and checkpoint | No mapped attribution | P=1.00 |
+
+Figure 8. Mean absolute integrated-gradient attribution for the 25 leading selected-Transformer features. Bars show fold means and horizontal lines show between-fold ranges. The revised executable preferentially uses DeepSHAP and records integrated gradients only as a fallback.
+
+# Discussion
+
+## Principal Findings
+
+This revision changes the evidentiary focus from approximately 100,000 labeled cells to 4 independent patients. In the baseline-only LOPO analysis, each neural architecture assigned higher mean probabilities to the 2 responders than to the 2 nonresponders. The same data also showed why a perfect patient AUROC must not be read as validation: 4 probabilities permit only 6 balanced label assignments, so even perfect ordering cannot achieve an exact one-sided P value below .167. The retrained permutation experiment and patient-clustered bootstrap further demonstrate that more cells do not compensate for the absence of independent patients.
+
+The transcriptome-only sensitivity analysis performed at least as well as the combined model, whereas the TCR-only model failed. Likewise, gene-PC ablation reversed all classifications and TCR ablation changed none. These convergent analyses do not support the original suggestion that receptor encoding improved prediction or calibration. In this dataset, the dominant separable signal was transcriptomic. That signal could represent response biology, cell-composition differences, patient identity, sample processing, or a combination of these sources.
+
+## Comparison With Prior Work
+
+Single-cell tumor and blood studies have associated immunotherapy with clonal replacement, cytotoxic lymphocyte states, interferon programs, and dynamic systemic immunity [3-7,31,32]. TCR sequence models can recover antigen-specific motifs and repertoire structure [8-11], while paired transcriptome-receptor approaches can link clonotypes to cellular state. The current gene-loading results—CCL4, FGFBP2, IL2RB, KLRF1, and GZMH among the leading genes—are compatible with cytotoxic lymphocyte biology described in those studies. The interferon and T-cell activation attribution summaries are also biologically plausible.
+
+Plausibility is not independent validation. Attribution methods explain a model's local sensitivity, not causality or the stability of a biomarker across populations [28,29]. The modest correlation of fold-specific gene rankings and the dominance of mitochondrial attribution reinforce the need to distinguish technical or compositional signals from response mechanisms. Future analyses should evaluate within-cell-type pseudobulk profiles, explicitly model patient and sample effects, and test whether leading pathways remain stable in an external cohort [12,13].
+
+## Preprocessing and Dimensionality Reduction
+
+Moving highly variable gene selection, scaling, PCA, and k-mer vocabulary construction inside each outer training fold removes an important source of test-patient leakage. Excluding UMAP from supervised features also avoids using a visualization embedding whose geometry may depend on the complete dataset [33]. These changes are consequential because a global embedding can transmit information from a held-out patient even when the classifier itself is fitted only on training rows.
+
+The training-fold variance analysis gives a quantitative interpretation of the 50-PC choice. Approximately 30%-31% of expression variance was retained, far below the proposed 80% target. Fifty PCs can still serve as a regularizing cap in a small exploratory analysis, but the component count should be prespecified or selected within inner validation in a larger study. Variance retention alone does not determine predictive sufficiency; low-variance immune programs may be informative, whereas high-variance technical structure may not be.
+
+## Timepoint and Missingness Interpretation
+
+Restricting the primary analysis to baseline aligns the outcome claim with pretreatment prediction. The recurrence-excluded and all-timepoint analyses answer different questions: whether longitudinal immune states remain associated with eventual outcome after treatment has begun. Their high performance cannot be used as evidence of prospective prediction because treatment exposure and recurrence can alter both expression and repertoire state.
+
+TCR coverage varied substantially across baseline patients, and S8 lacked receptor sequencing entirely. Explicit missingness indicators and zero filling prevent software failure and avoid discarding these cells, but they do not make missingness random. A model can learn technical provenance from missing-chain indicators. Reporting performance without sample-level repertoire summaries, comparing transcriptome-only and TCR-only models, and ablating receptor features reduced this ambiguity. The results indicate that TCR missingness was not required for the primary Transformer classification, although the cohort is too small to estimate a missingness effect.
+
+## Architecture Tuning and Overfitting
+
+Applying the same nested Optuna structure to MLP, CNN, BiLSTM, Transformer, and XGBoost corrects the prior unequal benchmark design. However, the inner loop contains only 3 patients, and the archived 3-trial completion budget is too small to establish optimal architectures. The low XGBoost learning-rate range demonstrates how a formally tuned model can still yield an invalid comparison when the search space is poorly chosen. The corrected code broadens that range, increases the default trial budget, and logs training and validation losses separately, but a corrected full run is still required before XGBoost is ranked against the neural models.
+
+Deep learning is not justified here by an abundance of independent outcomes. Dropout, weight decay, early stopping, grouped validation, seed checks, and perturbation tests constrain model behavior but do not solve the 4-patient sample size. Model complexity should be reevaluated in a larger cohort against simpler penalized regression and tree baselines. Model selection and performance evaluation should ideally be separated, with an external site or study reserved for confirmation [19-22,34].
+
+## Strengths and Limitations
+
+The principal strengths are preservation of LOPO evaluation; pretreatment baseline as the primary question; training-only gene and receptor feature construction; removal of UMAP predictors; equal tuning logic across architectures; explicit cell, sample, and patient outputs; patient-clustered uncertainty; exact and retrained label controls; TCR missingness handling; modality ablation; seed stability; out-of-distribution perturbation; and fold-specific attribution mapping. The revised artifacts make the consequences of each modeling choice inspectable rather than relying on a single aggregate AUROC.
+
+The overriding limitation is the cohort of 4 patients from one public study. Patient-level CIs can be degenerate because resampling 4 perfectly ordered outcomes repeatedly does not create new information. Fold metrics for a single held-out patient cannot estimate AUROC because that fold contains one outcome class. Inner grouped tuning is unstable, the archived search used only 3 trials, and the XGBoost comparator requires rerunning after correction. No independent cohort, prospective collection, prespecified clinical threshold, decision-curve analysis, or subgroup evaluation was available. The all-timepoint result may reflect treatment and recurrence states. Cell composition and processing batch could remain confounded with patient outcome. Finally, PCA back-projection distributes component attribution across correlated loadings and should be treated as a hypothesis-generation device.
+
+## Future Directions
+
+Future studies should recruit substantially more independent patients, retain a fully untouched external cohort, prespecify baseline collection and outcome timing, balance processing batches across response groups, and report sample and patient predictions. Within-cell-type pseudobulk or hierarchical models should be compared with cell-level learners. The number of PCs and all architecture hyperparameters should be selected only within grouped training data. TCR analyses should separate alpha- and beta-chain availability, quantify repertoire coverage, and test whether sequence features add value beyond expression and cell composition. Candidate cytotoxic and interferon programs should be validated with orthogonal assays rather than inferred from attribution alone.
+
+## Conclusions
+
+Leakage-controlled analysis of baseline peripheral blood single-cell multimodal data produced a separable signal in 4 held-out patients, driven primarily by gene-expression components. Patient aggregation and patient-level negative controls substantially change its interpretation: the clinically relevant evidence consists of 4 held-out probabilities, not 39,532 independent outcomes. The result is an exploratory proof of concept and is not ready for clinical use. Larger, prospectively collected and externally validated cohorts are required before peripheral single-cell features can support treatment selection.
+
+## Acknowledgments
+
+The author thanks Sun et al for making GSE300475 publicly available and acknowledges the patients and clinical teams who contributed to the original study. The author also thanks research mentor Dr Morteza Sarmadi for guidance.
+
+## Data Availability
+
+The source dataset is publicly available from the Gene Expression Omnibus under accession GSE300475. The revised analysis executable regenerates processed features from the public raw files and exports aggregate metrics, figures, model settings, and software metadata. Public repository information should be added to the journal metadata when the revision is committed and uploaded.
+
+## Authors' Contributions
+
+ASJ performed the computational analysis, software development, interpretation, visualization, and manuscript preparation.
+
+## Funding
+
+No external funding was received for this study.
+
+## Conflicts of Interest
+
+None declared.
+
+## Abbreviations
+
 AUROC: area under the receiver operating characteristic curve
-AUPRC: area under the precision-recall curve
-PCA: principal component analysis
-MLP: multilayer perceptron
-CNN: convolutional neural network
-BiLSTM: bidirectional long short-term memory
-TCR: T cell receptor
+
+BiLSTM: bidirectional long short-term memory network
+
 CDR3: complementarity-determining region 3
-PBMC: peripheral blood mononuclear cell
-V(D)J: variable(Diversity)joining repertoire sequencing.
-References
-1. Robert C. A decade of immune-checkpoint inhibitors in cancer therapy. Nature
-Communications. 2020;11:3801. doi:https://doi.org/10.1038/s41467-020-17670-y
-2. Schmid P, Adams S, S RH, Schneeweiss A, H BC, Iwata H. Atezolizumab and nabpaclitaxel in advanced triple-negative breast cancer. New England Journal of Medicine.
-2019;380:985-988. doi:https://doi.org/10.1056/nejmc1900150
-3. Emens LA, Ascierto, Paolo A, Darcy PK, et al. Cancer immunotherapy: opportunities
-and challenges in the rapidly evolving clinical landscape. European Journal of Cancer.
-2017;81:116-129. doi:https://doi.org/10.1016/j.ejca.2017.01.035
-4. Anna KS, Fekete JT, Győrffy B. Predictive biomarkers of immunotherapy response with
-pharmacological applications in solid tumors. Acta Pharmacologica Sinica.
-2023;44:1879-1889. doi:https://doi.org/10.1038/s41401-023-01079-6
-5. Kiriakidou N, Livieris, Ioannis E, Diou C. XGBoost: A scalable tree boosting system. In:
-IFIP Advances in Information and Communication Technology. ; 2024:58-70.
-doi:https://doi.org/10.1007/978-3-031-63219-8_5
-6. Antoniadis A, Cugliari J, Fasiolo M, Goude Y, Poggi JM. Random forests. Statistics for
-Industry, Technology, and Engineering. 2024;45:99-111.
-doi:https://doi.org/10.1007/978-3-031-60339-6_5
-7. M FC. Deep Learning. Vol 17. MIT Press; 2003.
-doi:https://doi.org/10.4314/sajhe.v17i1.25201
-8. Vaswani A, Shazeer N, Parmar N, et al. Attention is all you need. In: Vol 30. ; 2025.
-doi:https://doi.org/10.65215/nxvz2v36
-9. Jurtz VI, Jessen LE, Bentzen AK, et al. NetTCR: sequence-based prediction of T-cell
-receptor binding to peptide-MHC complexes using convolutional neural networks.
-Bioinformatics. 2018;34:i399-i407. doi:https://doi.org/10.1101/433706
-10. Sidhom JW, Benjamin LH, Pardoll DM, Baras AS. DeepTCR: a deep learning
-framework for revealing sequence-level predictors in T cell receptor repertoires. Nature
-Communications. 2021;12:1605. doi:https://doi.org/10.1038/s41467-021-21879-w
-11. Glanville J, Huang H, Nau A, et al. Identifying specificity groups in the T cell receptor
-repertoire. Nature. 2017;547:94-98. doi:https://doi.org/10.1038/nature22976
-12. Dash P, Fiore-Gartland AJ, Hertz T, et al. Quantifiable predictive features define
-epitope-specific T cell receptor repertoires. Nature. 2017;547:89-93.
-doi:https://doi.org/10.1038/nature22383
-13. Bagaev, Dmitry V, Vroomans, Renske M A, Samir J, et al. VDJdb in 2019: database
-extension, new analysis infrastructure and a T-cell receptor motif compendium. Nucleic
-Acids Research. 2019;48:D1057-D1062. doi:https://doi.org/10.1093/nar/gkz874
-14. Kather JN, Pearson AT, Halama N, et al. Deep learning can predict microsatellite
-instability directly from histology in gastrointestinal cancer. Nature Medicine.
-2019;25:1054-1056. doi:https://doi.org/10.1038/s41591-019-0462-y
-15. Saltz J, Gupta R, Hou L, et al. Spatial organization and molecular correlation of tumorinfiltrating lymphocytes using deep learning on pathology images. Cell Reports.
-2018;23:181-193.e7. doi:https://doi.org/10.1016/j.celrep.2018.03.086
-16. Cristescu R, Mogg R, Ayers M, et al. Pan-tumor genomic biomarkers for PD-1
-checkpoint blockade–based immunotherapy. Science. 2018;362:eaar3593.
-doi:https://doi.org/10.1126/science.aar3593
-17. Bagaev A, Kotlov N, Nomie K, et al. Conserved pan-cancer microenvironment subtypes
-predict response to immunotherapy. Cancer Cell. 2021;39:845-865.e7.
-doi:https://doi.org/10.1016/j.ccell.2021.04.014
-18. Benzekry S, Grangeon M, Karlsen M, et al. Machine learning for prediction of
-immunotherapy efficacy in non-small cell lung cancer from simple clinical and
-biological data. Cancers. 2021;16:527. doi:https://doi.org/10.1101/2021.11.30.21267064
-19. Lu S, Stein JE, Rimm DL, et al. Comparison of biomarker modalities for predicting
-response to PD-1/PD-L1 checkpoint blockade: A systematic review and meta-analysis.
-JAMA Oncology. 2019;5:1195. doi:https://doi.org/10.1001/jamaoncol.2019.1549
-20. Eraslan G, Simon LM, Mircea M, Mueller NS, Theis FJ. Single-cell RNA-seq denoising
-using a deep count autoencoder. Nature Communications. 2018;10:390.
-doi:https://doi.org/10.1101/300681
-21. Lopez R, Regier J, Cole MB, Jordan MI, Yosef N. Deep generative modeling for singlecell transcriptomics. Nature Methods. 2018;15:1053-1058.
-doi:https://doi.org/10.1038/s41592-018-0229-2
-22. Lotfollahi M, Alexander WF, Theis FJ. scGen predicts single-cell perturbation
-responses. Nature Methods. 2019;16:715-721. doi:https://doi.org/10.1038/s41592-019-
-0494-8
-23. Ji Y, Lotfollahi M, Alexander WF, Theis FJ. Machine learning for perturbational singlecell omics. Cell Systems. 2021;12:522-537.
-doi:https://doi.org/10.1016/j.cels.2021.05.016
-24. Bassez A, Vos H, Dyck V, et al. A single-cell map of intratumoral changes during antiPD1 treatment of patients with breast cancer. Nature Medicine. 2021;27:820-832.
-doi:https://doi.org/10.1038/s41591-021-01323-8
-25. Wu SZ, Al-Eryani G, Roden DL, et al. A single-cell and spatially resolved atlas of
-human breast cancers. Nature Genetics. 2021;53:1334-1347.
-doi:https://doi.org/10.1038/s41588-021-00911-1
-26. Tirosh I, Izar B, Prakadan, Sanjay M, et al. Dissecting the multicellular ecosystem of
-metastatic melanoma by single-cell RNA-seq. Science. 2016;352:189-196.
-doi:https://doi.org/10.1126/science.aad0501
-27. Thorsson V, Gibbs DL, Brown SD, et al. The immune landscape of cancer. Immunity.
-2018;48:812-830.e14. doi:https://doi.org/10.1016/j.immuni.2018.03.023
-28. Stuart T, Butler A, Hoffman P, et al. Comprehensive integration of single-cell data. Cell.
-2018;177:1888-1902.e21. doi:https://doi.org/10.1101/460147
-29. Zhang Q, He Y, Luo N, et al. Landscape and dynamics of single immune cells in
-hepatocellular carcinoma. Cell. 2019;179:829-845.e20.
-doi:https://doi.org/10.1016/j.cell.2019.10.003
-30. Kim N, Kim HK, Lee K, et al. Single-cell RNA sequencing demonstrates the molecular
-and cellular reprogramming of metastatic lung adenocarcinoma. Nature
-Communications. 2020;11:2285. doi:https://doi.org/10.1038/s41467-020-16164-1
-31. Yost KE, Satpathy, Ansuman T, Wells DK, et al. Clonal replacement of tumor-specific T
-cells following PD-1 blockade. Nature Medicine. 2019;25:1251-1259.
-doi:https://doi.org/10.1101/648899
-32. Wieder T, Eigentler T, Brenner E, Röcken M. Temporal changes in the T cell repertoire
-during checkpoint blockade therapy. Journal of Allergy and Clinical Immunology.
-2018;142:1403-1414. doi:https://doi.org/10.1016/j.jaci.2018.02.042
-33. Bolotin DA, Poslavsky S, Mitrophanov I, et al. MiXCR: software for comprehensive
-adaptive immunity profiling. Nature Methods. 2015;12:380-381.
-doi:https://doi.org/10.1038/nmeth.3364
-34. Wezenaar, A. K. L, Pandey U, Keramati F, et al. Mapping T cell dynamics to molecular
-profiles through behavior-guided transcriptomics. Nature Protocols. 2025;20:2453-2480.
-doi:https://doi.org/10.1038/s41596-024-01126-4
-35. Luo J, Vanguri, Rami S, Aukerman AT, et al. Multimodal integration of radiology,
-pathology and genomics for prediction of response to PD-(L)1 blockade in patients with
-non-small cell lung cancer. Journal of Clinical Oncology. 2022;40:9064-9064.
-doi:https://doi.org/10.1200/jco.2022.40.16_suppl.9064
-36. Dia AK, Kolnohuz A, Yolchuyeva S, et al. Computational analysis of whole slide
-images predicts PD-L1 expression and progression-free survival in immunotherapytreated non-small cell lung cancer patients. Journal of Translational Medicine.
-2025;23:510. doi:https://doi.org/10.1186/s12967-025-06487-2
-37. Huang X, Qiu W, Kong Y, et al. Artificial intelligence-based multimodal prediction of
-postoperative adjuvant immunotherapy benefit in urothelial carcinoma: Results from the
-phase III IMvigor010 trial. MedComm. 2025;6:e70324.
-doi:https://doi.org/10.1002/mco2.70324
-38. Rakaee M, Tafavvoghi M, Ricciuti B, et al. Deep learning model for predicting
-immunotherapy response in advanced non-small cell lung cancer. JAMA Oncology.
-2025;11:109. doi:https://doi.org/10.1001/jamaoncol.2024.5356
-39. Kourou K, Exarchos, Themis P, Exarchos, Konstantinos P, Karamouzis, Michalis V,
-Fotiadis DI. Machine learning applications in cancer prognosis and prediction.
-Computational and Structural Biotechnology Journal. 2015;13:8-17.
-doi:https://doi.org/10.1016/j.csbj.2014.11.005
-40. Sun X, Axelrod ML, Waks AG, et al. Dynamic single-cell systemic immune responses
-in immunotherapy-treated early-stage HR+ breast cancer patients. npj Breast Cancer.
-2025;11:65. doi:https://doi.org/10.1038/s41523-025-00776-1
-41. Khoury T, Peng X, Yan L, Wang D, Nagrale V. Tumor infiltrating lymphocytes in breast
-cancer. American Journal of Clinical Pathology. 2018;150:441-450.
-doi:https://doi.org/10.1093/ajcp/aqy069
-42. Grace, Terry JM, Belgrader P, et al. Massively parallel digital transcriptional profiling of
-single cells. Nature Communications. 2017;8:14049.
-doi:https://doi.org/10.1038/ncomms14049
-43. Dekkers JF, Alieva M, Cleven A, et al. Uncovering the mode of action of engineered T
-cells in patient cancer organoids. Nature Biotechnology. 2022;41:60-69.
-doi:https://doi.org/10.1038/s41587-022-01397-w
-44. Jiang P, Gu S, Pan D, et al. Signatures of T cell dysfunction and exclusion predict cancer
-immunotherapy response. Nature Medicine. 2018;24:1550-1558.
-doi:https://doi.org/10.1038/s41591-018-0136-1
-45. Ichiryu N, Fairchild PJ. Acquisition of immune privilege by transformed cells: inhibiting
-and facilitating immune escape. Methods in Molecular Biology. 2013;98:1-16.
-doi:https://doi.org/10.1007/978-1-62703-478-4_1Phillips SJ, Whisnant JP.
-Hypertension and stroke. In: Laragh JH, Brenner BM, editors. Hypertension:
-pathophysiology, diagnosis, and management. 2nd ed. New York: Raven Press;
-1995. p. 465-78.
+
+CI: confidence interval
+
+CNN: convolutional neural network
+
+LOPO: leave-one-patient-out
+
+MLP: multilayer perceptron
+
+PCA: principal component analysis
+
+SHAP: SHapley Additive exPlanations
+
+TCR: T-cell receptor
+
+UMAP: uniform manifold approximation and projection
+
+V(D)J: variable, diversity, and joining gene segments
+
+# References
+
+1. Cardoso F, McArthur HL, Schmid P, et al. Pembrolizumab and chemotherapy in high-risk, early-stage, estrogen receptor-positive/human epidermal growth factor receptor 2-negative breast cancer: a randomized phase 3 trial. Nat Med. 2025;31:442-448. doi:10.1038/s41591-024-03415-7
+2. Loi S, McArthur HL, Harbeck N, et al. Neoadjuvant nivolumab and chemotherapy in early estrogen receptor-positive breast cancer: a randomized phase 3 trial. Nat Med. 2025;31:433-441. doi:10.1038/s41591-024-03414-8
+3. Sun X, Axelrod ML, Waks AG, et al. Dynamic single-cell systemic immune responses in immunotherapy-treated early-stage hormone receptor-positive breast cancer patients. NPJ Breast Cancer. 2025;11:65. doi:10.1038/s41523-025-00776-1
+4. Bassez A, Vos H, Van Dyck L, et al. A single-cell map of intratumoral changes during anti-programmed death 1 treatment of patients with breast cancer. Nat Med. 2021;27:820-832. doi:10.1038/s41591-021-01323-8
+5. Wu SZ, Al-Eryani G, Roden DL, et al. A single-cell and spatially resolved atlas of human breast cancers. Nat Genet. 2021;53:1334-1347. doi:10.1038/s41588-021-00911-1
+6. Hao Y, Hao S, Andersen-Nissen E, et al. Integrated analysis of multimodal single-cell data. Cell. 2021;184:3573-3587.e29. doi:10.1016/j.cell.2021.04.048
+7. Yost KE, Satpathy AT, Wells DK, et al. Clonal replacement of tumor-specific T cells following programmed death 1 blockade. Nat Med. 2019;25:1251-1259. doi:10.1038/s41591-019-0522-3
+8. Glanville J, Huang H, Nau A, et al. Identifying specificity groups in the T cell receptor repertoire. Nature. 2017;547:94-98. doi:10.1038/nature22976
+9. Dash P, Fiore-Gartland AJ, Hertz T, et al. Quantifiable predictive features define epitope-specific T cell receptor repertoires. Nature. 2017;547:89-93. doi:10.1038/nature22383
+10. Jurtz VI, Jessen LE, Bentzen AK, et al. NetTCR: sequence-based prediction of T-cell receptor binding to peptide-major histocompatibility complexes using convolutional neural networks. Bioinformatics. 2018;34:i399-i407. doi:10.1093/bioinformatics/bty466
+11. Sidhom JW, Larman HB, Pardoll DM, Baras AS. DeepTCR is a deep learning framework for revealing sequence concepts within T-cell repertoires. Nat Commun. 2021;12:1605. doi:10.1038/s41467-021-21879-w
+12. Zimmerman KD, Espeland MA, Langefeld CD. A practical solution to pseudoreplication bias in single-cell studies. Nat Commun. 2021;12:738. doi:10.1038/s41467-021-21038-1
+13. Squair JW, Gautier M, Kathe C, et al. Confronting false discoveries in single-cell differential expression. Nat Commun. 2021;12:5692. doi:10.1038/s41467-021-25960-2
+14. LeCun Y, Bengio Y, Hinton G. Deep learning. Nature. 2015;521:436-444. doi:10.1038/nature14539
+15. Hochreiter S, Schmidhuber J. Long short-term memory. Neural Comput. 1997;9:1735-1780. doi:10.1162/neco.1997.9.8.1735
+16. Schuster M, Paliwal KK. Bidirectional recurrent neural networks. IEEE Trans Signal Process. 1997;45:2673-2681. doi:10.1109/78.650093
+17. Vaswani A, Shazeer N, Parmar N, et al. Attention is all you need. Adv Neural Inf Process Syst. 2017;30:5998-6008.
+18. Chen T, Guestrin C. XGBoost: a scalable tree boosting system. In: Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining. Association for Computing Machinery; 2016:785-794. doi:10.1145/2939672.2939785
+19. Varma S, Simon R. Bias in error estimation when using cross-validation for model selection. BMC Bioinformatics. 2006;7:91. doi:10.1186/1471-2105-7-91
+20. Varoquaux G. Cross-validation failure: small sample sizes lead to large error bars. Neuroimage. 2018;180:68-77. doi:10.1016/j.neuroimage.2017.06.061
+21. Riley RD, Snell KIE, Ensor J, et al. Minimum sample size for developing a multivariable prediction model: part II—binary and time-to-event outcomes. Stat Med. 2019;38:1276-1296. doi:10.1002/sim.7992
+22. Van Calster B, McLernon DJ, van Smeden M, Wynants L, Steyerberg EW. Calibration: the Achilles heel of predictive analytics. BMC Med. 2019;17:230. doi:10.1186/s12916-019-1466-7
+23. Symmans WF, Peintinger F, Hatzis C, et al. Measurement of residual breast cancer burden to predict survival after neoadjuvant chemotherapy. J Clin Oncol. 2007;25:4414-4422. doi:10.1200/JCO.2007.10.6823
+24. Akiba T, Sano S, Yanase T, Ohta T, Koyama M. Optuna: a next-generation hyperparameter optimization framework. In: Proceedings of the 25th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining. Association for Computing Machinery; 2019:2623-2631. doi:10.1145/3292500.3330701
+25. Hanley JA, McNeil BJ. The meaning and use of the area under a receiver operating characteristic curve. Radiology. 1982;143:29-36. doi:10.1148/radiology.143.1.7063747
+26. Brier GW. Verification of forecasts expressed in terms of probability. Mon Weather Rev. 1950;78:1-3. doi:10.1175/1520-0493(1950)078<0001:VOFEIT>2.0.CO;2
+27. Efron B. Bootstrap methods: another look at the jackknife. Ann Stat. 1979;7:1-26. doi:10.1214/aos/1176344552
+28. Lundberg SM, Lee SI. A unified approach to interpreting model predictions. Adv Neural Inf Process Syst. 2017;30:4765-4774.
+29. Sundararajan M, Taly A, Yan Q. Axiomatic attribution for deep networks. In: Proceedings of the 34th International Conference on Machine Learning. PMLR; 2017:3319-3328.
+30. Collins GS, Moons KGM, Dhiman P, et al. TRIPOD+AI statement: updated guidance for reporting clinical prediction models that use regression or machine learning methods. BMJ. 2024;385:e078378. doi:10.1136/bmj-2023-078378
+31. Robert C. A decade of immune-checkpoint inhibitors in cancer therapy. Nat Commun. 2020;11:3801. doi:10.1038/s41467-020-17670-y
+32. Borcherding N, Bormann NL, Kraus G. scRepertoire: an R-based toolkit for single-cell immune receptor analysis. F1000Res. 2020;9:47. doi:10.12688/f1000research.22139.2
+33. McInnes L, Healy J, Melville J. UMAP: uniform manifold approximation and projection for dimension reduction. arXiv. Preprint posted online February 9, 2018. doi:10.48550/arXiv.1802.03426
+34. Wolff RF, Moons KGM, Riley RD, et al. PROBAST: a tool to assess the risk of bias and applicability of prediction model studies. Ann Intern Med. 2019;170:51-58. doi:10.7326/M18-1376
+35. Pedregosa F, Varoquaux G, Gramfort A, et al. Scikit-learn: machine learning in Python. J Mach Learn Res. 2011;12:2825-2830.
+36. Stuart T, Butler A, Hoffman P, et al. Comprehensive integration of single-cell data. Cell. 2019;177:1888-1902.e21. doi:10.1016/j.cell.2019.05.031
+37. Luecken MD, Theis FJ. Current best practices in single-cell RNA sequencing analysis: a tutorial. Mol Syst Biol. 2019;15:e8746. doi:10.15252/msb.20188746
+38. Jolliffe IT, Cadima J. Principal component analysis: a review and recent developments. Philos Trans A Math Phys Eng Sci. 2016;374:20150202. doi:10.1098/rsta.2015.0202

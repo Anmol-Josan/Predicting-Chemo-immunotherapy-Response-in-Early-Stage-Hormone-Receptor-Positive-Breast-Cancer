@@ -59,6 +59,22 @@ Table 1. Baseline cohort and productive T-cell receptor coverage.
 | Patient 3 | Nonresponder | 10398 | 51.1 | 55.0 | 56.4 |
 | Patient 4 | Nonresponder | 11480 | 43.9 | 48.9 | 50.5 |
 
+Table 2. Longitudinal sample distribution, productive receptor coverage, and sequencing availability.
+
+| Patient | Outcome | Timepoint | Sample | Cells | Productive TRA / TRB, % | Sequencing modality |
+|---|---|---|---|---:|---:|---|
+| Patient 1 | Responder | Baseline | S1 | 8931 | 44.9 / 52.7 | RNA + V(D)J |
+| Patient 1 | Responder | Post-treatment | S2 | 9069 | 42.5 / 51.3 | RNA + V(D)J |
+| Patient 1 | Responder | Recurrence | S3 | 7358 | 42.5 / 53.9 | RNA + V(D)J |
+| Patient 2 | Responder | Baseline | S4 | 8723 | 28.3 / 33.9 | RNA + V(D)J |
+| Patient 2 | Responder | Post-treatment | S5 | 2912 | 31.4 / 41.0 | RNA + V(D)J |
+| Patient 3 | Nonresponder | Baseline | S6 | 10398 | 51.1 / 55.0 | RNA + V(D)J |
+| Patient 3 | Nonresponder | Post-treatment | S7 | 9330 | 51.9 / 57.3 | RNA + V(D)J |
+| Patient 3 | Nonresponder | Recurrence | S8 | 12832 | 0.0 / 0.0 | RNA only; no V(D)J |
+| Patient 4 | Nonresponder | Baseline | S9 | 11480 | 43.9 / 48.9 | RNA + V(D)J |
+| Patient 4 | Nonresponder | Post-treatment | S10 | 9704 | 52.2 / 58.4 | RNA + V(D)J |
+| Patient 4 | Nonresponder | Recurrence | S11 | 9330 | 40.5 / 45.6 | RNA + V(D)J |
+
 ## Timepoint Stratification and TCR Missingness
 
 The executable exposes baseline, all-timepoint, and recurrence-excluded switches. Baseline was prespecified as primary because only pretreatment observations can support a prospective response-prediction interpretation. Analyses containing on-treatment or recurrence cells were treated as sensitivity analyses of longitudinal immune-state classification, not as validation of pretreatment prediction.
@@ -101,7 +117,7 @@ Pathway summaries used prespecified cytotoxic-effector, interferon-response, T-c
 
 ## Software and Reproducibility
 
-The archived run used Python 3.12.13, NumPy 2.0.2, pandas 2.3.3, scikit-learn 1.6.1 [35], XGBoost 3.2.0, TensorFlow 2.20.0, SHAP 0.51.0, and Optuna 4.9.0. The fixed random seed was 93768. The executable exports cell-, sample-, patient-, fold-, and pooled metrics; clustered CIs; hyperparameters; preprocessing objects; PCA variance; loss curves; attribution summaries; sensitivity analyses; robustness controls; and software metadata. Standalone figures are saved without embedded titles or captions at 600 dots per inch. Reporting was aligned with the emphasis of TRIPOD+AI on transparent clinical prediction-model methods and limitations [30].
+The supplied result archive used Python 3.12.13, NumPy 2.0.2, pandas 2.3.3, scikit-learn 1.6.1 [35], XGBoost 3.2.0, TensorFlow 2.20.0, SHAP 0.51.0, and Optuna 4.9.0. The fixed random seed was 93768. The executable exports cell-, sample-, patient-, fold-, and pooled metrics; clustered CIs; hyperparameters; preprocessing objects; PCA variance; loss curves; attribution summaries; sensitivity analyses; robustness controls; and software metadata. For the reported cell-level CIs, the archived out-of-fold cell predictions were re-scored after resampling complete patient clusters; patient-level CIs were calculated from the corresponding patient means. Standalone figures are saved without embedded titles or captions at 600 dots per inch. Reporting was aligned with the emphasis of TRIPOD+AI on transparent clinical prediction-model methods and limitations [30].
 
 ## Ethics Considerations
 
@@ -111,7 +127,7 @@ This work was a secondary computational analysis of public, deidentified data. N
 
 ## Cohort and TCR Coverage
 
-The baseline cohort contained 39,532 cells, with 8931-11,480 cells per patient (Table 1). A productive alpha or beta chain was observed in 35.4%-56.4% of cells across patients. At baseline, 45.0% of responder cells and 53.3% of nonresponder cells contained at least one productive chain. These are descriptive cell fractions rather than independent group estimates. The all-timepoint cohort contained the original 100,067 cells across 11 samples; the recurrence sample S8 contributed 12,832 gene-expression profiles with both receptor chains coded as missing.
+The baseline cohort contained 39,532 cells, with 8931-11,480 cells per patient (Table 1). The full longitudinal distribution is shown in Table 2. A productive alpha or beta chain was observed in 35.4%-56.4% of cells across patients. At baseline, 45.0% of responder cells and 53.3% of nonresponder cells contained at least one productive chain. These are descriptive cell fractions rather than independent group estimates. Patient-level expanded-clonotype cell fractions ranged from 0.135 to 0.205 among responders and from 0.138 to 0.232 among nonresponders; these descriptive values were not tested as independent group evidence. The all-timepoint cohort contained the original 100,067 cells across 11 samples; the recurrence sample S8 contributed 12,832 gene-expression profiles with both receptor chains coded as missing.
 
 ## Training-Fold PCA Variance
 
@@ -121,9 +137,9 @@ Figure 1. Cumulative explained gene-expression variance across principal compone
 
 ## Cell- and Patient-Level Model Performance
 
-The neural models produced high pooled cell-level discrimination, with AUROCs from 0.996 to 1.000 and patient-clustered CIs shown in Table 2. Patient aggregation yielded the same ordering for every neural architecture: the mean probabilities of both responders exceeded 0.50 and those of both nonresponders were below 0.50 (Table 3 and Figure 2). Thus, neural patient-level AUROC and accuracy were 1.00. The MLP had the lowest pooled cell Brier score (0.00047), while the Transformer Brier score was 0.0229. The archived XGBoost run reversed the patient ordering and had AUROC and accuracy of 0.00; because its learning-rate search was defective, it cannot support a fair architecture comparison.
+The neural models produced high pooled cell-level discrimination, with AUROCs from 0.996 to 1.000 and patient-clustered CIs shown in Table 3. Patient aggregation yielded the same ordering for every neural architecture: the mean probabilities of both responders exceeded 0.50 and those of both nonresponders were below 0.50 (Table 4 and Figure 2). Thus, neural patient-level AUROC and accuracy were 1.00. The MLP had the lowest pooled cell Brier score (0.00047), while the Transformer Brier score was 0.0229. Patient expected calibration error was 0.0010 for the MLP, 0.0439 for the CNN, 0.0297 for the BiLSTM, and 0.0307 for the Transformer. The archived XGBoost run reversed the patient ordering and had AUROC and accuracy of 0.00; because its learning-rate search was defective, it cannot support a fair architecture comparison.
 
-Table 2. Pooled out-of-fold performance with patient-clustered 95% confidence intervals.
+Table 3. Pooled out-of-fold performance with patient-clustered 95% confidence intervals.
 
 | Model | Evaluation level | AUROC (95% CI) | Accuracy (95% CI) | Brier score (95% CI) |
 |---|---|---|---|---|
@@ -138,7 +154,7 @@ Table 2. Pooled out-of-fold performance with patient-clustered 95% confidence in
 | Transformer | Patient | 1.000 (1.000-1.000) | 1.000 (1.000-1.000) | 0.0014 (0.0001-0.0029) |
 | XGBoost, archived defective search | Patient | 0.000 (0.000-0.000) | 0.000 (0.000-0.000) | 0.4183 (0.4057-0.4292) |
 
-Table 3. Mean response probabilities for each held-out patient.
+Table 4. Mean response probabilities for each held-out patient.
 
 | Model | Patient 1, responder | Patient 2, responder | Patient 3, nonresponder | Patient 4, nonresponder |
 |---|---:|---:|---:|---:|
@@ -150,13 +166,15 @@ Table 3. Mean response probabilities for each held-out patient.
 
 Figure 2. Mean response probability across cells for each held-out patient. Orange bars denote responders, green bars denote nonresponders, and the dashed line marks the 0.50 classification threshold.
 
+Table 4 is also the fold-level patient report: each column corresponds to the single patient held out in one outer LOPO fold. Conventional AUROC cannot be estimated within an individual fold because the held-out fold contains only one outcome unit; the pooled patient metrics therefore summarize the four fold-level probabilities.
+
 The apparently perfect neural patient metrics represent only 4 predictions. Every valid two-class bootstrap resample preserved their ordering, so the patient-level CIs were degenerate at 1.00. Exact enumeration of the 6 balanced patient-label assignments yielded a minimum attainable one-sided P value of .167. When the Transformer was retrained under 5 shuffled balanced assignments, 1 shuffled assignment also achieved AUROC 1.00, producing an empirical P value of .33. Accordingly, the observed separation was not statistically distinguishable from the patient-label null at P<.05.
 
 ## Sensitivity and Robustness Analyses
 
-The baseline transcriptome-only Transformer retained cell-level AUROC 1.000 (95% CI 1.000-1.000) and patient-level AUROC 1.00. In contrast, the TCR-only Transformer reversed the cell and patient ordering (AUROC 0.00). Adding receptor features did not improve discrimination over the transcriptome-only representation in this cohort. Longitudinal combined-feature analyses also separated the 4 patients, whether recurrence samples were excluded or all 11 samples were included (Table 4), but these analyses classify observations collected after treatment and cannot be interpreted as prospective baseline prediction.
+The baseline transcriptome-only Transformer retained cell-level AUROC 1.000 (95% CI 1.000-1.000) and patient-level AUROC 1.00. In contrast, the TCR-only Transformer reversed the cell and patient ordering (AUROC 0.00). Adding receptor features did not improve discrimination over the transcriptome-only representation in this cohort. Longitudinal combined-feature analyses also separated the 4 patients, whether recurrence samples were excluded or all 11 samples were included (Table 5), but these analyses classify observations collected after treatment and cannot be interpreted as prospective baseline prediction.
 
-Table 4. Transformer sensitivity analyses.
+Table 5. Transformer sensitivity analyses.
 
 | Analysis | Cells | Cell AUROC (95% CI) | Cell accuracy | Patient AUROC | Patient accuracy |
 |---|---:|---|---:|---:|---:|
@@ -187,9 +205,9 @@ Figure 7. Archived XGBoost evaluation-loss trace. The corrected executable recor
 
 The archived selected-Transformer attribution summary was led by gene-expression principal components 4, 3, 7, 1, and 2, with several alpha- and beta-chain physicochemical summaries also appearing among the 25 largest features (Figure 8). Fold-specific modality fractions were variable: the gene-expression block accounted for 45.9%-86.8% of absolute attribution across folds. Pairwise fold attribution correlations were modest (Spearman 0.32-0.47), and top-25 gene overlap ranged from 0.56 to 0.72, emphasizing uncertainty in the ranking.
 
-Back-projection through PCA loadings ranked CD14, CLIC3, S100A12, MT-CO2, MATK, CCL4, MS4A6A, IL2RB, FGFBP2, KLRF1, KLRG1, and GZMH among the leading genes. Prespecified attribution enrichment was strongest for mitochondrial, cytotoxic-effector, memory/naive, and T-cell activation sets; interferon-response attribution was also above its random-set null, whereas the exhaustion/checkpoint set had no mapped attribution (Table 5). These empirical values quantify where this fitted model concentrated attribution and are not patient-level biological association P values.
+Back-projection through PCA loadings ranked CD14, CLIC3, S100A12, MT-CO2, MATK, CCL4, MS4A6A, IL2RB, FGFBP2, KLRF1, KLRG1, and GZMH among the leading genes. Prespecified attribution enrichment was strongest for mitochondrial, cytotoxic-effector, memory/naive, and T-cell activation sets; interferon-response attribution was also above its random-set null, whereas the exhaustion/checkpoint set had no mapped attribution (Table 6). These empirical values quantify where this fitted model concentrated attribution and are not patient-level biological association P values.
 
-Table 5. Selected gene and pathway attribution results from the Transformer.
+Table 6. Selected gene and pathway attribution results from the Transformer.
 
 | Result type | Gene or pathway | Attribution summary | Empirical comparison |
 |---|---|---:|---:|
@@ -262,7 +280,7 @@ The author thanks Sun et al for making GSE300475 publicly available and acknowle
 
 ## Data Availability
 
-The source dataset is publicly available from the Gene Expression Omnibus under accession GSE300475. The revised analysis executable regenerates processed features from the public raw files and exports aggregate metrics, figures, model settings, and software metadata. Public repository information should be added to the journal metadata when the revision is committed and uploaded.
+The source dataset is publicly available from the Gene Expression Omnibus under accession GSE300475. The revised analysis executable regenerates processed features from the public raw files and exports aggregate metrics, figures, model settings, and software metadata. Code and manuscript sources are available at https://github.com/Anmol-Josan/Predicting-Chemo-immunotherapy-Response-in-Early-Stage-Hormone-Receptor-Positive-Breast-Cancer.
 
 ## Authors' Contributions
 

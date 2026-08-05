@@ -52,6 +52,8 @@ RUNTIME_PACKAGES = {
     "sklearn": "scikit-learn>=1.3",
     "xgboost": "xgboost>=2.0",
     "tensorflow": "tensorflow>=2.15",
+    "optuna": "optuna>=3.5",
+    "shap": "shap>=0.44",
 }
 
 
@@ -755,7 +757,7 @@ def param_candidates(name: str, seed: int) -> List[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
     for _ in range(8):
         dropout = float(rng.choice([0.1, 0.2, 0.35]))
-        lr = float(rng.choice([1e-4, 3e-4, 1e-3]))
+        lr = float(rng.choice([0.03, 0.07, 0.12])) if name == "XGBoost" else float(rng.choice([1e-4, 3e-4, 1e-3]))
         batch = int(rng.choice([128, 256, 512]))
         if name == "MLP":
             candidates.append({"hidden_units": tuple(rng.choice([32, 64, 128], size=2)), "dropout": dropout, "l2": float(rng.choice([1e-6, 1e-4, 1e-3])), "final_units": 32, "learning_rate": lr, "batch_size": batch})
@@ -774,7 +776,10 @@ def param_candidates(name: str, seed: int) -> List[Dict[str, Any]]:
 def optuna_parameters(name: str, trial: Any) -> Dict[str, Any]:
     """Architecture-specific Optuna search spaces used inside each LOPO fold."""
     dropout = trial.suggest_float("dropout", 0.1, 0.35)
-    learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-3, log=True)
+    learning_rate = trial.suggest_float(
+        "learning_rate", 0.01 if name == "XGBoost" else 1e-4,
+        0.2 if name == "XGBoost" else 3e-3, log=True,
+    )
     batch_size = trial.suggest_categorical("batch_size", [128, 256, 512])
     if name == "MLP":
         return {"hidden_units": (trial.suggest_categorical("units_1", [32, 64, 128]), trial.suggest_categorical("units_2", [32, 64, 128])), "dropout": dropout, "l2": trial.suggest_float("l2", 1e-6, 1e-3, log=True), "final_units": 32, "learning_rate": learning_rate, "batch_size": batch_size}
@@ -822,14 +827,17 @@ def fit_xgboost(X_train: np.ndarray, y_train: np.ndarray, params: Mapping[str, A
     weights = balanced_sample_weights(groups_train) if groups_train is not None else None
     fit_kwargs: Dict[str, Any] = {"sample_weight": weights, "verbose": False}
     if X_val is not None and y_val is not None:
-        fit_kwargs["eval_set"] = [(X_val, y_val)]
+        fit_kwargs["eval_set"] = [(X_train, y_train), (X_val, y_val)]
     try:
         model.fit(X_train, y_train, **fit_kwargs)
     except (TypeError, ValueError):
         fit_kwargs.pop("verbose", None)
         model.fit(X_train, y_train, **fit_kwargs)
     evals = model.evals_result() if X_val is not None and y_val is not None else {}
-    return model, {"loss": list(evals.get("validation_0", {}).get("logloss", [])), "val_loss": list(evals.get("validation_0", {}).get("logloss", []))}
+    return model, {
+        "loss": list(evals.get("validation_0", {}).get("logloss", [])),
+        "val_loss": list(evals.get("validation_1", {}).get("logloss", [])),
+    }
 
 
 def predict_model(model_name: str, model: Any, X: np.ndarray) -> np.ndarray:
@@ -954,17 +962,32 @@ def compute_metrics(y_true: np.ndarray, probabilities: np.ndarray) -> Dict[str, 
 
 def aggregate_predictions(predictions: pd.DataFrame, unit: str) -> pd.DataFrame:
     group_col = "patient_id" if unit == "patient" else "sample_id"
-    return predictions.groupby(group_col, as_index=False).agg(y=("y", "first"), probability=("probability", "mean"), n_cells=("probability", "size"))
+    aggregations: Dict[str, Tuple[str, str]] = {
+        "y": ("y", "first"),
+        "probability": ("probability", "mean"),
+        "n_cells": ("probability", "size"),
+    }
+    if unit == "sample" and "patient_id" in predictions.columns:
+        aggregations["patient_id"] = ("patient_id", "first")
+    return predictions.groupby(group_col, as_index=False).agg(**aggregations)
 
 
-def patient_bootstrap(predictions: pd.DataFrame, unit: str, n_bootstrap: int, seed: int) -> Dict[str, Tuple[float, float]]:
-    grouped = aggregate_predictions(predictions, unit)
-    units = grouped["patient_id" if unit == "patient" else "sample_id"].to_numpy()
+def patient_bootstrap(
+    predictions: pd.DataFrame,
+    unit: str,
+    n_bootstrap: int,
+    seed: int,
+    aggregate_before_metric: bool = True,
+) -> Dict[str, Tuple[float, float]]:
+    """Resample patients while preserving the requested scoring level."""
+    source = aggregate_predictions(predictions, unit) if aggregate_before_metric else predictions
+    group_col = "patient_id" if "patient_id" in source.columns else "sample_id"
+    units = source[group_col].unique()
     rng = np.random.default_rng(seed)
     values = {metric: [] for metric in METRIC_NAMES}
     for _ in range(n_bootstrap):
         sampled = rng.choice(units, size=len(units), replace=True)
-        pieces = [grouped.iloc[np.flatnonzero(units == unit_name)] for unit_name in sampled]
+        pieces = [source.loc[source[group_col] == unit_name] for unit_name in sampled]
         boot = pd.concat(pieces, ignore_index=True)
         current = compute_metrics(boot["y"].to_numpy(), boot["probability"].to_numpy())
         for metric in METRIC_NAMES:
@@ -1038,7 +1061,7 @@ def attribution_modality(feature_name: str) -> str:
 
 
 def compute_shap_summary(model_name: str, records: List[FitRecord], data: CellData, outdir: Path, args: argparse.Namespace) -> None:
-    """Export fold-stable Transformer IG or tree SHAP with gene back-projection."""
+    """Export fold-stable tree/deep SHAP values with gene back-projection."""
     feature_rows: List[Dict[str, Any]] = []
     gene_rows: List[Dict[str, Any]] = []
     fold_vectors: Dict[int, np.ndarray] = {}
@@ -1053,14 +1076,26 @@ def compute_shap_summary(model_name: str, records: List[FitRecord], data: CellDa
             if model_name == "XGBoost":
                 import shap
 
-                raw = shap.TreeExplainer(record.model).shap_values(X)
+                raw = shap.Explainer(record.model)(X).values
                 attributions = raw[0] if isinstance(raw, list) else raw
                 attributions = np.asarray(attributions, dtype=np.float32)
             else:
-                attributions = integrated_gradients(record.model, X, args.ig_steps, args.interpret_batch_size)
+                import shap
+
+                background = np.zeros((1, X.shape[1]), dtype=np.float32)
+                raw = shap.DeepExplainer(record.model, background).shap_values(X)
+                attributions = raw[0] if isinstance(raw, list) else raw
+                attributions = np.asarray(attributions, dtype=np.float32)
         except Exception as exc:
-            LOGGER.warning("Attribution failed for %s fold %s: %s", model_name, record.fold, exc)
-            continue
+            if model_name == "XGBoost":
+                LOGGER.warning("Tree SHAP failed for %s fold %s: %s", model_name, record.fold, exc)
+                continue
+            LOGGER.warning("DeepSHAP failed for %s fold %s (%s); using integrated gradients fallback", model_name, record.fold, exc)
+            try:
+                attributions = integrated_gradients(record.model, X, args.ig_steps, args.interpret_batch_size)
+            except Exception as fallback_exc:
+                LOGGER.warning("Attribution fallback failed for %s fold %s: %s", model_name, record.fold, fallback_exc)
+                continue
         if attributions.ndim == 3:
             attributions = attributions[:, :, 0]
         feature_names = record.feature_names
@@ -1120,7 +1155,7 @@ def compute_shap_summary(model_name: str, records: List[FitRecord], data: CellDa
     fig, ax = plt.subplots(figsize=(7.2, 6.0))
     ax.barh(np.arange(len(top)), top["mean_abs_attribution"], xerr=top["sd_abs_attribution"].fillna(0), color="#4c78a8", alpha=0.9)
     ax.set_yticks(np.arange(len(top)), top["feature"], fontsize=7)
-    ax.set_xlabel("Mean absolute integrated-gradient attribution" if model_name != "XGBoost" else "Mean absolute SHAP attribution")
+    ax.set_xlabel("Mean absolute SHAP attribution")
     fig.tight_layout()
     save_clean_figure(fig, outdir / "shap_summary_plot.png")
     save_clean_figure(
@@ -1644,10 +1679,35 @@ def train_model_task(
     params, tune_history, tune_score = tune_model(model_name, X, y, groups, train_idx, args, fold)
     full_relative = sample_group_indices(groups[train_idx], args.max_train_cells_per_patient, args.seed + fold + 100)
     full_train_idx = train_idx[full_relative]
+    validation_candidates = make_inner_splits(full_train_idx, groups, args.seed + fold + 200)
+    validation_split = next(
+        ((tr, va) for tr, va in validation_candidates if len(np.unique(y[tr])) == 2),
+        None,
+    )
+    fit_history: Dict[str, List[float]] = {"loss": [], "val_loss": []}
+    selected_iterations = int(params.get("n_estimators", args.epochs))
+    if validation_split is not None:
+        fit_idx, validation_idx = validation_split
+        if model_name == "XGBoost":
+            provisional, fit_history = fit_xgboost(
+                X[fit_idx], y[fit_idx], params, args.seed + fold + 500,
+                X[validation_idx], y[validation_idx], groups[fit_idx],
+            )
+        else:
+            provisional, fit_history = fit_neural(
+                X[fit_idx], y[fit_idx], params, model_name, args.seed + fold + 500,
+                args.epochs, X[validation_idx], y[validation_idx], groups[fit_idx],
+            )
+        if fit_history.get("val_loss"):
+            selected_iterations = int(np.nanargmin(fit_history["val_loss"])) + 1
+        del provisional
+        gc.collect()
     if model_name == "XGBoost":
-        model, _ = fit_xgboost(X[full_train_idx], y[full_train_idx], params, args.seed + fold, groups_train=groups[full_train_idx])
+        final_params = dict(params)
+        final_params["n_estimators"] = max(1, selected_iterations)
+        model, _ = fit_xgboost(X[full_train_idx], y[full_train_idx], final_params, args.seed + fold, groups_train=groups[full_train_idx])
     else:
-        model, _ = fit_neural(X[full_train_idx], y[full_train_idx], params, model_name, args.seed + fold, args.epochs, groups_train=groups[full_train_idx])
+        model, _ = fit_neural(X[full_train_idx], y[full_train_idx], params, model_name, args.seed + fold, selected_iterations, groups_train=groups[full_train_idx])
     probabilities = predict_model(model_name, model, X[test_idx])
     artifact = model_artifact_path(outdir, model_name, fold)
     ensure_dir(artifact.parent)
@@ -1670,7 +1730,9 @@ def train_model_task(
         "fold": fold,
         "held_out_patient": held_out,
         "params": params,
-        "tune_history": tune_history,
+        "tune_history": fit_history,
+        "inner_tune_history": tune_history,
+        "selected_iterations": selected_iterations,
         "tune_score": tune_score,
     }
     metadata_path = checkpoint_dir / f"{model_name}_fold_{fold}.json"
@@ -1686,7 +1748,7 @@ def train_model_task(
     del model
     gc.collect()
     return ModelTaskResult(
-        model_name, fold, held_out, params, tune_history, tune_score,
+        model_name, fold, held_out, params, fit_history, tune_score,
         str(artifact), test_idx, probabilities, False,
     )
 
@@ -2113,7 +2175,13 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         for aggregation, frame, unit in (("cell_pooled", predictions, "patient"), ("patient_pooled", patient_predictions, "patient"), ("sample_pooled", sample_predictions, "sample")):
             metric_input = frame if aggregation == "cell_pooled" else frame.rename(columns={"probability": "probability"})
             metrics = compute_metrics(metric_input["y"].to_numpy(), metric_input["probability"].to_numpy())
-            ci = patient_bootstrap(predictions, unit, args.bootstrap_replicates, args.seed + 1000) if aggregation != "cell_pooled" else patient_bootstrap(predictions, "patient", args.bootstrap_replicates, args.seed + 1000)
+            ci = patient_bootstrap(
+                predictions,
+                unit,
+                args.bootstrap_replicates,
+                args.seed + 1000,
+                aggregate_before_metric=aggregation != "cell_pooled",
+            )
             for metric, value in metrics.items():
                 lower, upper = ci[metric]
                 metric_rows.append({"model": model_name, "fold": "pooled", "held_out_patient": "all", "aggregation": aggregation, "metric": metric, "value": value, "ci_lower": lower, "ci_upper": upper, "n_units": int(metric_input["patient_id" if aggregation == "patient_pooled" else "sample_id"].nunique()) if aggregation != "cell_pooled" else int(predictions["patient_id"].nunique())})
@@ -2198,7 +2266,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--max-kmers", type=int, default=256)
     parser.add_argument("--max-train-cells-per-patient", type=int, default=10000, help="Cap used for each outer fit to control runtime; 0 uses all cells")
     parser.add_argument("--tune-cells-per-patient", type=int, default=2000, help="Cap used by inner tuning; 0 uses all cells")
-    parser.add_argument("--n-trials", type=int, default=4, help="Randomized trials per architecture; every architecture is tuned")
+    parser.add_argument("--n-trials", type=int, default=12, help="Optuna trials per architecture within each outer fold; every architecture is tuned")
     parser.add_argument("--tune-epochs", type=int, default=12)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--sequence-channels", type=int, default=1, help="Pack adjacent scalar features into channels for CNN/BiLSTM/Transformer; values >1 reduce sequence cost")
@@ -2240,7 +2308,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.completion_mode:
         args.max_train_cells_per_patient = 6000
         args.tune_cells_per_patient = 1200
-        args.n_trials = 3
+        args.n_trials = max(6, min(args.n_trials, 8))
         args.tune_epochs = 8
         args.epochs = 30
         args.sequence_channels = 16

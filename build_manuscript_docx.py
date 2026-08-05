@@ -232,7 +232,7 @@ def set_table_geometry(table, widths):
 def widths_for(headers):
     n = len(headers)
     if n == 7:
-        return [1050, 1350, 850, 900, 850, 2180, 2180]
+        return [950, 1600, 1450, 850, 800, 2050, 1660]
     if n == 6:
         if headers[0].strip().lower() == "analysis":
             return [1900, 950, 1850, 1400, 1600, 1660]

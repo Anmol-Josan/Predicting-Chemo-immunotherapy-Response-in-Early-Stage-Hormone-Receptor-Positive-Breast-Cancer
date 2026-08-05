@@ -11,41 +11,38 @@ jobs:
 
     steps:
       - name: Checkout repository code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
-          lfs: true
+          # The historical repository contains multi-gigabyte LFS archives.
+          # The current pipeline can download the public GEO inputs itself.
+          lfs: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
       - name: Install Kaggle API
         run: python -m pip install --upgrade "kaggle>=1.8.3"
 
-      - name: Prepare compact Kaggle resume payload
+      - name: Prepare clean Kaggle kernel package
         run: |
-          test -f results.zip
-          # The original archive also contains ~1.2 GB of downloaded GEO data.
-          # Kaggle can fetch that data in seconds; only the completed model and
-          # preprocessor artifacts are needed to resume training.
-          unzip -oq results.zip 'results/*' -d .
-          mv results.zip /tmp/results-full.zip
-          zip -qr results.zip results
+          mkdir -p kaggle-kernel
+          cp run_revision_pipeline.py kernel-metadata.json kaggle-kernel/
+          # Keep the upload intentionally source-only. The pipeline detects the
+          # Kaggle runtime, downloads GSE300475, and writes fresh result artifacts.
+          test ! -e kaggle-kernel/results.zip
+          test -z "$(find kaggle-kernel -type f -size +20M -print -quit)"
 
       - name: Validate Kaggle entrypoint
         run: |
-          test -f run_revision_pipeline.py
-          test -f results.zip
-          test -d results/models
-          test "$(find results/models -type f | wc -l)" -ge 12
-          # Catch an unhydrated Git-LFS pointer before invoking the Kaggle API.
-          test "$(stat -c%s results.zip)" -gt 1000000
-          python -m py_compile run_revision_pipeline.py
+          test -f kaggle-kernel/run_revision_pipeline.py
+          test -f kaggle-kernel/kernel-metadata.json
+          python -m py_compile kaggle-kernel/run_revision_pipeline.py
           python - <<'PY'
           import json
           from pathlib import Path
-          metadata = json.loads(Path("kernel-metadata.json").read_text())
+          metadata = json.loads(Path("kaggle-kernel/kernel-metadata.json").read_text())
           assert metadata["code_file"] == "run_revision_pipeline.py"
           assert metadata["kernel_type"] == "script"
           assert metadata["enable_gpu"] == "false"
@@ -55,5 +52,4 @@ jobs:
         env:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
-          # results.zip is included in the kernel package and auto-detected by the script.
-          kaggle kernels push -p .
+          kaggle kernels push -p kaggle-kernel

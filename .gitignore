@@ -50,5 +50,6 @@ Image/*.md
 /_qa*/
 /_docx_figures/
 /_template_reference/
+/kaggle-kernel/
 __pycache__/
 *.pyc
